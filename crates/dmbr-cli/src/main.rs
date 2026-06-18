@@ -75,8 +75,7 @@ fn load_inputs(args: &Args) -> Result<(FullMenu, ScreenConfig, DayState), String
 
 /// Reads and deserializes a JSON file into `T`.
 fn read_json<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T, String> {
-    let contents =
-        fs::read_to_string(path).map_err(|e| format!("failed to read '{path}': {e}"))?;
+    let contents = fs::read_to_string(path).map_err(|e| format!("failed to read '{path}': {e}"))?;
     serde_json::from_str(&contents).map_err(|e| format!("failed to parse '{path}': {e}"))
 }
 

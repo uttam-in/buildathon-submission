@@ -94,17 +94,11 @@ pub fn balance(screens: &mut [Vec<CategoryWithItems>]) -> BalanceResult {
 }
 
 fn argmax(v: &[usize]) -> Option<usize> {
-    v.iter()
-        .enumerate()
-        .max_by_key(|(_, &c)| c)
-        .map(|(i, _)| i)
+    v.iter().enumerate().max_by_key(|(_, &c)| c).map(|(i, _)| i)
 }
 
 fn argmin(v: &[usize]) -> Option<usize> {
-    v.iter()
-        .enumerate()
-        .min_by_key(|(_, &c)| c)
-        .map(|(i, _)| i)
+    v.iter().enumerate().min_by_key(|(_, &c)| c).map(|(i, _)| i)
 }
 
 fn smallest_category_index(screen: &[CategoryWithItems]) -> Option<usize> {

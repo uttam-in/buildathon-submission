@@ -18,7 +18,9 @@ fn parse_hhmm(s: &str) -> Result<u32> {
         .parse()
         .map_err(|_| RenderError::InvalidInput(format!("invalid minute in '{s}'")))?;
     if hours > 23 || mins > 59 {
-        return Err(RenderError::InvalidInput(format!("time '{s}' out of range")));
+        return Err(RenderError::InvalidInput(format!(
+            "time '{s}' out of range"
+        )));
     }
     Ok(hours * 60 + mins)
 }
@@ -53,12 +55,9 @@ pub fn detect_meal_period(
         RenderError::InvalidInput(format!("unknown timezone '{}'", day_state.timezone))
     })?;
 
-    let parsed: DateTime<chrono::FixedOffset> =
-        DateTime::parse_from_rfc3339(&day_state.timestamp).map_err(|e| {
-            RenderError::InvalidInput(format!(
-                "invalid timestamp '{}': {e}",
-                day_state.timestamp
-            ))
+    let parsed: DateTime<chrono::FixedOffset> = DateTime::parse_from_rfc3339(&day_state.timestamp)
+        .map_err(|e| {
+            RenderError::InvalidInput(format!("invalid timestamp '{}': {e}", day_state.timestamp))
         })?;
 
     let local = parsed.with_timezone(&tz);

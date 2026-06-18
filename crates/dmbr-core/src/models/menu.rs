@@ -76,7 +76,7 @@ impl FullMenu {
     /// Ensures every item price is non-negative.
     pub fn validate(&self) -> Result<()> {
         for item in &self.items {
-            if !(item.price >= 0.0) {
+            if item.price.is_nan() || item.price < 0.0 {
                 return Err(RenderError::InvalidInput(format!(
                     "item {} has invalid price {}",
                     item.id, item.price

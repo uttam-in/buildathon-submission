@@ -177,7 +177,10 @@ mod tests {
 
     #[test]
     fn escapes_all_significant_chars() {
-        assert_eq!(escape_html("a & b < c > d \" '"), "a &amp; b &lt; c &gt; d &quot; &#39;");
+        assert_eq!(
+            escape_html("a & b < c > d \" '"),
+            "a &amp; b &lt; c &gt; d &quot; &#39;"
+        );
     }
 
     #[test]
