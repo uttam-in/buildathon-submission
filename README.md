@@ -89,6 +89,20 @@ combined JSON object on stdin:
 echo '{"menu":{...},"config":{...},"state":{...}}' | dmbr-cli
 ```
 
+### CLI flags
+
+| Flag              | Description                            |
+|-------------------|----------------------------------------|
+| `--menu <file>`   | Path to the `FullMenu` JSON file.      |
+| `--config <file>` | Path to the `ScreenConfig` JSON file.  |
+| `--state <file>`  | Path to the `DayState` JSON file.      |
+| `--pretty`        | Pretty-print the output JSON.          |
+| `--help`          | Show usage.                            |
+
+Provide all three of `--menu`, `--config`, and `--state` together, or none of
+them (in which case a single combined object is read from stdin). Errors are
+written to stderr and the process exits with code `1`.
+
 ### Example input
 
 `menu.json`
