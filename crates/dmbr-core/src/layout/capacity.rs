@@ -3,17 +3,17 @@
 use crate::models::{Orientation, ScreenDef};
 
 /// Outer margin around the content area, in pixels.
-pub const MARGIN_PX: u32 = 32;
-/// Reserved height for the screen header band.
-pub const HEADER_HEIGHT_PX: u32 = 80;
+pub const MARGIN_PX: u32 = 40;
+/// Reserved height for the screen header band (brand + meal period).
+pub const HEADER_HEIGHT_PX: u32 = 96;
 /// Reserved height for the screen footer band.
-pub const FOOTER_HEIGHT_PX: u32 = 40;
-/// Vertical space a single item occupies (name + price line).
-pub const ITEM_SLOT_HEIGHT_PX: u32 = 72;
-/// Vertical space a category header occupies.
-pub const CATEGORY_HEADER_HEIGHT_PX: u32 = 48;
+pub const FOOTER_HEIGHT_PX: u32 = 36;
+/// Vertical space a single item occupies (one name/price line, compact).
+pub const ITEM_SLOT_HEIGHT_PX: u32 = 38;
+/// Vertical space a category header occupies (including its bottom rule).
+pub const CATEGORY_HEADER_HEIGHT_PX: u32 = 46;
 /// Gutter between columns, in pixels.
-pub const GUTTER_PX: u32 = 24;
+pub const GUTTER_PX: u32 = 36;
 
 /// The slot budget derived from a screen's geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,18 +34,22 @@ fn column_count(screen: &ScreenDef) -> u32 {
     match screen.orientation {
         Orientation::Landscape => {
             if screen.width_px >= 1920 {
+                4
+            } else if screen.width_px >= 1280 {
                 3
-            } else if screen.width_px >= 960 {
+            } else if screen.width_px >= 720 {
                 2
             } else {
                 1
             }
         }
         Orientation::Portrait => {
-            if screen.width_px < 600 {
-                1
-            } else {
+            if screen.width_px >= 1080 {
+                3
+            } else if screen.width_px >= 600 {
                 2
+            } else {
+                1
             }
         }
     }
@@ -85,19 +89,28 @@ mod tests {
     }
 
     #[test]
-    fn landscape_1080p_three_columns() {
+    fn landscape_1080p_four_columns() {
         let c = compute_capacity(&screen(Orientation::Landscape, 1920, 1080));
-        assert_eq!(c.column_count, 3);
-        // usable = 1080 - 80 - 40 - 64 = 896; 896/72 = 12
-        assert_eq!(c.usable_height, 896);
-        assert_eq!(c.max_items_per_column, 12);
-        assert_eq!(c.total_slots, 36);
+        assert_eq!(c.column_count, 4);
+        // usable = 1080 - 96 - 36 - 80 = 868; 868/38 = 22
+        assert_eq!(c.usable_height, 868);
+        assert_eq!(c.max_items_per_column, 22);
+        assert_eq!(c.total_slots, 88);
     }
 
     #[test]
-    fn landscape_midsize_two_columns() {
+    fn portrait_1080p_three_columns() {
+        let c = compute_capacity(&screen(Orientation::Portrait, 1080, 1920));
+        assert_eq!(c.column_count, 3);
+        // usable = 1920 - 96 - 36 - 80 = 1708; 1708/38 = 44
+        assert_eq!(c.max_items_per_column, 44);
+        assert_eq!(c.total_slots, 132);
+    }
+
+    #[test]
+    fn landscape_midsize_three_columns() {
         let c = compute_capacity(&screen(Orientation::Landscape, 1280, 720));
-        assert_eq!(c.column_count, 2);
+        assert_eq!(c.column_count, 3);
     }
 
     #[test]

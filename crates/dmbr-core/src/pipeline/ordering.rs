@@ -44,6 +44,7 @@ mod tests {
             available: true,
             display_order: order,
             description: None,
+            price_display: None,
         }
     }
 

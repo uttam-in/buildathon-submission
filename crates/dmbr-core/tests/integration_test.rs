@@ -31,6 +31,7 @@ fn ten_item_menu() -> FullMenu {
             available: true,
             display_order: i as i64,
             description: None,
+            price_display: None,
         });
     }
     for i in 0..5 {
@@ -42,6 +43,7 @@ fn ten_item_menu() -> FullMenu {
             available: true,
             display_order: i as i64,
             description: None,
+            price_display: None,
         });
     }
 

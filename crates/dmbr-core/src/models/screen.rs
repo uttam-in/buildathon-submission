@@ -58,9 +58,9 @@ impl ScreenConfig {
     /// Validates the configuration: supported screen count, matching screen
     /// list length, and positive pixel dimensions.
     pub fn validate(&self) -> Result<()> {
-        if !matches!(self.screen_count, 1 | 2 | 4 | 8 | 16) {
+        if !matches!(self.screen_count, 1 | 2 | 3 | 4 | 8 | 16) {
             return Err(RenderError::InvalidInput(format!(
-                "unsupported screen_count {} (allowed: 1, 2, 4, 8, 16)",
+                "unsupported screen_count {} (allowed: 1, 2, 3, 4, 8, 16)",
                 self.screen_count
             )));
         }

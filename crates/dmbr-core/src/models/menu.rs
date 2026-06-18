@@ -35,6 +35,13 @@ pub struct MenuItem {
     /// Optional short description.
     #[serde(default)]
     pub description: Option<String>,
+    /// Optional pre-formatted price string (e.g. a range like `$19.99–79.99`).
+    /// When present the renderer shows this verbatim instead of formatting
+    /// [`price`](Self::price); [`price`](Self::price) still drives validation
+    /// and ordering. Allows callers to express price ranges the numeric field
+    /// cannot.
+    #[serde(default)]
+    pub price_display: Option<String>,
 }
 
 /// A time-window rule selecting which categories are shown during a meal period.

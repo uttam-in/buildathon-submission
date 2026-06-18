@@ -8,13 +8,13 @@ use std::time::Instant;
 use crate::error::Result;
 use crate::hash::render_hash;
 use crate::layout::capacity::{compute_capacity, GUTTER_PX, MARGIN_PX};
-use crate::layout::{balance, negotiate_font, partition};
+use crate::layout::{balance, negotiate_font, paginate, partition};
 use crate::models::{
     DayState, FullMenu, LayoutOutput, RenderedScreen, ScreenConfig, ScreenDef, Warning,
 };
 use crate::pipeline::{build_ordered_groups, detect_meal_period, filter_menu, CategoryWithItems};
 
-pub use html::{escape_html, render_screen};
+pub use html::{escape_html, render_screen, ScreenMeta};
 
 /// Per-column content width in pixels for a screen with `column_count` columns.
 fn column_width(screen: &ScreenDef, column_count: u32) -> u32 {
@@ -94,29 +94,37 @@ pub fn render(
         let capacity = compute_capacity(screen);
         let container_w = column_width(screen, capacity.column_count);
 
-        let placed: usize = slots.iter().map(CategoryWithItems::item_count).sum();
-        if capacity.total_slots > 0 && placed > capacity.total_slots as usize {
+        // Split this screen's content into capacity-sized pages. When the menu
+        // is denser than one screen can hold (e.g. the whole menu on a single
+        // landscape screen), the pages cycle deterministically via CSS so every
+        // item is shown legibly without clipping.
+        let page_cap = capacity.total_slots.max(1) as usize;
+        let pages = paginate(slots, page_cap);
+        if pages.len() > 1 {
+            // Not a failure: the screen shows everything by cycling. Surfaced
+            // via `fallback_used` so callers can note cycling is in effect.
             fallback_used = true;
             warnings.push(Warning::warn(
-                "screen_overflow",
+                "paged_cycling",
                 format!(
-                    "screen {} holds {} items but fits {}",
-                    screen.id, placed, capacity.total_slots
+                    "screen {} cycles through {} pages ({} items)",
+                    screen.id,
+                    pages.len(),
+                    slots.iter().map(CategoryWithItems::item_count).sum::<usize>()
                 ),
             ));
         }
 
         let font = negotiate_font(screen.height_px, container_w, longest_name_chars(slots));
-        if font.truncated {
-            warnings.push(Warning::warn(
-                "name_truncated",
-                format!("item names truncated on screen {}", screen.id),
-            ));
-        }
 
+        let meta = ScreenMeta {
+            title: menu.restaurant_id.clone(),
+            subtitle: active_meal_period.clone().unwrap_or_default(),
+        };
         let html = render_screen(
             screen,
-            slots,
+            &meta,
+            &pages,
             font.size_px,
             capacity.column_count,
             container_w,

@@ -1,0 +1,15 @@
+[package]
+name = "dmbr-convert"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dmbr-convert"
+path = "src/main.rs"
+
+[dependencies]
+dmbr-core = { path = "../dmbr-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }

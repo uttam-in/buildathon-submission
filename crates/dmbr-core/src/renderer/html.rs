@@ -2,7 +2,6 @@
 
 use std::fmt::Write as _;
 
-use crate::layout::font::max_chars;
 use crate::models::ScreenDef;
 use crate::pipeline::CategoryWithItems;
 
@@ -26,115 +25,210 @@ pub fn escape_html(input: &str) -> String {
     out
 }
 
-/// Truncates `name` to at most `limit` characters, appending an ellipsis when
-/// clipped. Operates on `char` boundaries so multibyte text is never split.
-fn truncate_name(name: &str, limit: usize) -> String {
-    if limit == 0 {
-        return String::new();
-    }
-    let count = name.chars().count();
-    if count <= limit {
-        return name.to_string();
-    }
-    let keep = limit.saturating_sub(1);
-    let mut s: String = name.chars().take(keep).collect();
-    s.push('…');
-    s
-}
-
 /// Formats a price as a fixed two-decimal string with a leading `$`.
 fn format_price(price: f64) -> String {
     format!("${:.2}", price)
 }
 
+/// Presentation metadata for a screen's header band.
+#[derive(Debug, Clone, Default)]
+pub struct ScreenMeta {
+    /// Brand / restaurant title (left of the header).
+    pub title: String,
+    /// Secondary line (e.g. active meal period); empty hides it.
+    pub subtitle: String,
+}
+
+/// Renders the inner HTML (category sections) for one page of content.
+fn render_page_body(groups: &[CategoryWithItems]) -> String {
+    let mut body = String::new();
+    for group in groups {
+        let mut cat_name = escape_html(&group.category.name);
+        if group.continued {
+            cat_name.push_str(" <span class=\"cont\">(cont.)</span>");
+        }
+        body.push_str("<section class=\"category\">");
+        let _ = write!(body, "<h2 class=\"cat-header\">{cat_name}</h2>");
+        for item in &group.items {
+            // Full names, never truncated: long names wrap (challenge rule).
+            let name = escape_html(&item.name);
+            let price_text = item
+                .price_display
+                .clone()
+                .unwrap_or_else(|| format_price(item.price));
+            let price = escape_html(&price_text);
+            let _ = write!(
+                body,
+                "<div class=\"menu-item\"><span class=\"item-name\">{name}</span>\
+                 <span class=\"leader\"></span>\
+                 <span class=\"item-price\">{price}</span></div>"
+            );
+        }
+        body.push_str("</section>");
+    }
+    body
+}
+
+/// Seconds each page is held before cycling to the next.
+const PAGE_HOLD_SECS: u32 = 8;
+
+/// Builds the keyframes + per-page animation CSS for an `n`-page cycle.
+///
+/// Each page is visible for an equal slice of a `n × PAGE_HOLD_SECS` loop, with
+/// a short cross-fade. The timeline is a pure function of the page count, so
+/// the animation is identical on every run (seeded by input, not the clock).
+fn cycle_css(n: usize) -> String {
+    if n <= 1 {
+        // Single page: always visible, no animation.
+        return ".page{opacity:1;}".to_string();
+    }
+    let total = n as u32 * PAGE_HOLD_SECS;
+    // Fade occupies ~6% of each page's slot.
+    let slice = 100.0 / n as f64;
+    let fade = (slice * 0.12).min(4.0);
+    let mut css = String::new();
+    // Stack all pages; animate opacity.
+    let _ = write!(
+        css,
+        ".page{{position:absolute;inset:0;opacity:0;animation:cycle {total}s steps(1,end) infinite;}}"
+    );
+    for i in 0..n {
+        let delay = i as u32 * PAGE_HOLD_SECS;
+        let _ = write!(
+            css,
+            ".page:nth-child({nth}){{animation-delay:{delay}s;}}",
+            nth = i + 1,
+            delay = delay
+        );
+    }
+    // Keyframes: visible for one slice (minus a fade tail), hidden otherwise.
+    let on_end = slice - fade;
+    let _ = write!(
+        css,
+        "@keyframes cycle{{0%{{opacity:1;}}{on_end:.3}%{{opacity:1;}}{slice:.3}%{{opacity:0;}}\
+100%{{opacity:0;}}}}",
+        on_end = on_end,
+        slice = slice
+    );
+    css
+}
+
 /// Renders one screen into a standalone HTML5 document.
 ///
-/// The document inlines all styling, uses CSS Grid for the column layout, and
-/// references no external resources. Item names that would overflow the column
-/// at `font_size_px` are truncated with an ellipsis. All user-supplied text is
-/// HTML-escaped.
+/// The document inlines all styling and references no external resources. The
+/// menu body uses a CSS *multi-column* flow: each category flows down a column
+/// and wraps to the next, keeping every item's name and price paired. Names are
+/// never truncated; long names wrap.
+///
+/// `pages` is the screen's content split into capacity-sized pages. A single
+/// page renders statically; multiple pages are stacked and cross-fade on a
+/// fixed, input-seeded CSS timeline so every item is shown legibly without
+/// clipping — deterministic by construction (no clock, no randomness). All
+/// user-supplied text is HTML-escaped.
 pub fn render_screen(
     screen: &ScreenDef,
-    slots: &[CategoryWithItems],
+    meta: &ScreenMeta,
+    pages: &[Vec<CategoryWithItems>],
     font_size_px: u32,
     column_count: u32,
     container_width: u32,
 ) -> String {
-    let cat_font = font_size_px + 4;
+    let cat_font = font_size_px + 3;
     let columns = column_count.max(1);
-    let char_limit = max_chars(container_width, font_size_px);
+    let _ = container_width; // width informs upstream font negotiation, not clipping
 
+    let page_count = pages.len().max(1);
     let mut body = String::new();
-    for group in slots {
-        let mut cat_name = escape_html(&group.category.name);
-        if group.continued {
-            cat_name.push_str(" (cont.)");
-        }
+    for (i, page) in pages.iter().enumerate() {
+        let indicator = if page_count > 1 {
+            format!(
+                "<div class=\"pageno\">{cur} / {total}</div>",
+                cur = i + 1,
+                total = page_count
+            )
+        } else {
+            String::new()
+        };
         let _ = write!(
             body,
-            "<div class=\"cat-header\">{cat_name}</div>",
-            cat_name = cat_name
+            "<div class=\"page\"><div class=\"cols\">{inner}</div>{indicator}</div>",
+            inner = render_page_body(page),
+            indicator = indicator
         );
-        for item in &group.items {
-            let display = truncate_name(&item.name, char_limit);
-            let name = escape_html(&display);
-            let price = escape_html(&format_price(item.price));
-            let _ = write!(
-                body,
-                "<div class=\"menu-item\"><span class=\"item-name\">{name}</span>\
-                 <span class=\"item-price\">{price}</span></div>"
-            );
-        }
     }
+    let cycle = cycle_css(page_count);
 
-    let title = escape_html(&screen.id);
+    let title = escape_html(&meta.title);
+    let subtitle = escape_html(&meta.subtitle);
+    let subtitle_html = if meta.subtitle.is_empty() {
+        String::new()
+    } else {
+        format!("<span class=\"period\">{subtitle}</span>")
+    };
 
     format!(
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
 <meta name=\"viewport\" content=\"width={width}, height={height}\">\n\
 <title>{title}</title>\n<style>\n\
 *{{margin:0;padding:0;box-sizing:border-box;}}\n\
-html,body{{width:{width}px;height:{height}px;background:#111;color:#fff;\
-font-family:{font_stack};overflow:hidden;}}\n\
+html,body{{width:{width}px;height:{height}px;overflow:hidden;}}\n\
+body{{background:radial-gradient(120% 90% at 0% 0%,#1c140e 0%,#0e0b09 55%,#070605 100%);\
+color:#f3ece1;font-family:{font_stack};}}\n\
 .board{{width:{width}px;height:{height}px;padding:{margin}px;display:flex;\
 flex-direction:column;}}\n\
-.header{{height:{header}px;display:flex;align-items:center;\
-font-size:{header_font}px;font-weight:700;overflow:hidden;}}\n\
-.content{{flex:1;display:grid;grid-template-columns:repeat({columns},1fr);\
-gap:{gutter}px;overflow:hidden;}}\n\
-.cat-header{{height:{cat_h}px;display:flex;align-items:center;\
-font-size:{cat_font}px;font-weight:700;border-bottom:2px solid #444;\
-margin-bottom:8px;overflow:hidden;white-space:nowrap;}}\n\
-.menu-item{{height:{item_h}px;display:flex;justify-content:space-between;\
-align-items:center;font-size:{item_font}px;overflow:hidden;}}\n\
-.item-name{{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;\
-flex:1;margin-right:12px;}}\n\
-.item-price{{font-family:{mono_stack};font-weight:700;overflow:hidden;\
-white-space:nowrap;}}\n\
-.footer{{height:{footer}px;display:flex;align-items:center;\
-font-size:{footer_font}px;color:#999;overflow:hidden;}}\n\
+.header{{height:{header}px;display:flex;align-items:baseline;gap:20px;\
+border-bottom:3px solid #c8862f;padding-bottom:14px;margin-bottom:18px;flex:none;}}\n\
+.brand{{font-size:{brand_font}px;font-weight:800;letter-spacing:-0.01em;\
+color:#fbf5ea;}}\n\
+.period{{font-size:{period_font}px;font-weight:600;text-transform:uppercase;\
+letter-spacing:0.16em;color:#e7b15a;}}\n\
+.content{{position:relative;flex:1;min-height:0;overflow:hidden;}}\n\
+.cols{{column-count:{columns};column-gap:{gutter}px;height:100%;overflow:hidden;}}\n\
+.pageno{{position:absolute;right:0;bottom:0;font-size:{footer_font}px;\
+color:#7a6c57;letter-spacing:0.08em;}}\n\
+{cycle}\n\
+.category{{margin:0 0 {cat_gap}px;}}\n\
+.cat-header{{font-size:{cat_font}px;font-weight:800;color:#e7b15a;\
+text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #4a3a26;\
+padding-bottom:6px;margin-bottom:8px;break-after:avoid;-webkit-column-break-after:avoid;}}\n\
+.cat-header .cont{{font-size:{item_font}px;font-weight:500;text-transform:none;\
+letter-spacing:0;color:#9b8b73;}}\n\
+.menu-item{{display:flex;align-items:baseline;font-size:{item_font}px;\
+line-height:1.25;padding:{item_pad}px 0;break-inside:avoid;\
+-webkit-column-break-inside:avoid;}}\n\
+.item-name{{flex:0 1 auto;overflow-wrap:anywhere;color:#f0e8da;}}\n\
+.leader{{flex:1 1 auto;min-width:10px;margin:0 8px;\
+border-bottom:1px dotted #5a4a33;transform:translateY(-4px);}}\n\
+.item-price{{flex:none;font-family:{mono_stack};font-weight:700;\
+color:#f4c87a;white-space:nowrap;}}\n\
+.footer{{height:{footer}px;display:flex;align-items:center;justify-content:flex-end;\
+font-size:{footer_font}px;color:#7a6c57;letter-spacing:0.08em;flex:none;}}\n\
 </style>\n</head>\n<body>\n\
 <div class=\"board\">\n\
-<div class=\"header\">{title}</div>\n\
-<div class=\"content\">{body}</div>\n\
-<div class=\"footer\">{title}</div>\n\
+<header class=\"header\"><span class=\"brand\">{title}</span>{subtitle_html}</header>\n\
+<main class=\"content\">{body}</main>\n\
+<footer class=\"footer\">{title} · {screen_id}</footer>\n\
 </div>\n</body>\n</html>",
         width = screen.width_px,
         height = screen.height_px,
         title = title,
+        screen_id = escape_html(&screen.id),
+        subtitle_html = subtitle_html,
         font_stack = FONT_STACK,
         mono_stack = MONO_STACK,
         margin = crate::layout::capacity::MARGIN_PX,
         header = crate::layout::capacity::HEADER_HEIGHT_PX,
         footer = crate::layout::capacity::FOOTER_HEIGHT_PX,
-        header_font = cat_font + 4,
+        brand_font = cat_font + 10,
+        period_font = font_size_px.saturating_sub(2).max(14),
         footer_font = font_size_px.saturating_sub(6).max(12),
-        cat_h = crate::layout::capacity::CATEGORY_HEADER_HEIGHT_PX,
-        item_h = crate::layout::capacity::ITEM_SLOT_HEIGHT_PX,
         gutter = crate::layout::capacity::GUTTER_PX,
+        cat_gap = crate::layout::capacity::GUTTER_PX,
         columns = columns,
         cat_font = cat_font,
         item_font = font_size_px,
+        item_pad = 2,
+        cycle = cycle,
         body = body,
     )
 }
@@ -170,8 +264,16 @@ mod tests {
                 available: true,
                 display_order: 1,
                 description: None,
+                price_display: None,
             }],
             continued: false,
+        }
+    }
+
+    fn meta() -> ScreenMeta {
+        ScreenMeta {
+            title: "Saffron Junction".into(),
+            subtitle: "Lunch".into(),
         }
     }
 
@@ -186,7 +288,7 @@ mod tests {
     #[test]
     fn html_contains_name_and_price() {
         let groups = vec![group_with("Burgers", "Cheeseburger", 8.99)];
-        let html = render_screen(&screen(), &groups, 28, 3, 600);
+        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
         assert!(html.contains("Cheeseburger"));
         assert!(html.contains("$8.99"));
         assert!(html.contains("Burgers"));
@@ -196,7 +298,7 @@ mod tests {
     #[test]
     fn escapes_item_name_in_output() {
         let groups = vec![group_with("Cat", "Fish & <Chips>", 5.0)];
-        let html = render_screen(&screen(), &groups, 28, 3, 600);
+        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
         assert!(html.contains("Fish &amp; &lt;Chips&gt;"));
         assert!(!html.contains("Fish & <Chips>"));
     }
@@ -204,7 +306,7 @@ mod tests {
     #[test]
     fn no_script_or_external_urls() {
         let groups = vec![group_with("Burgers", "Cheeseburger", 8.99)];
-        let html = render_screen(&screen(), &groups, 28, 3, 600);
+        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
         assert!(!html.contains("<script"));
         assert!(!html.contains("http://"));
         assert!(!html.contains("https://"));
@@ -214,15 +316,28 @@ mod tests {
     fn continuation_marker_appended() {
         let mut groups = vec![group_with("Burgers", "Cheeseburger", 8.99)];
         groups[0].continued = true;
-        let html = render_screen(&screen(), &groups, 28, 3, 600);
-        assert!(html.contains("Burgers (cont.)"));
+        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
+        assert!(html.contains("Burgers"));
+        assert!(html.contains("(cont.)"));
     }
 
     #[test]
-    fn long_name_truncated_with_ellipsis() {
+    fn long_name_is_not_truncated() {
+        // Names must never be clipped: the full string appears verbatim and no
+        // ellipsis is introduced (challenge rule: wrapping is fine, clipping is not).
         let long = "X".repeat(200);
         let groups = vec![group_with("Cat", &long, 1.0)];
-        let html = render_screen(&screen(), &groups, 24, 1, 100);
-        assert!(html.contains('…'));
+        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 24, 1, 100);
+        assert!(html.contains(&long));
+        assert!(!html.contains('…'));
+    }
+
+    #[test]
+    fn price_display_overrides_numeric_price() {
+        let mut groups = vec![group_with("Platters", "Mutton Platter", 19.99)];
+        groups[0].items[0].price_display = Some("$19.99–79.99".into());
+        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
+        assert!(html.contains("$19.99–79.99"));
+        assert!(!html.contains("$19.99<")); // not the bare numeric form
     }
 }

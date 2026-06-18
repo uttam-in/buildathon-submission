@@ -16,11 +16,11 @@ pub struct FontSpec {
 /// Preferred font size for a screen height.
 fn preferred_size(height_px: u32) -> u32 {
     if height_px >= 2160 {
-        36
+        32
     } else if height_px >= 1080 {
-        28
+        26
     } else {
-        22
+        20
     }
 }
 
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn short_names_keep_preferred_size() {
         let spec = negotiate_font(1080, 600, 10);
-        assert_eq!(spec.size_px, 28);
+        assert_eq!(spec.size_px, 26);
         assert!(!spec.truncated);
     }
 

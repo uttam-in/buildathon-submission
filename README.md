@@ -37,6 +37,25 @@ standalone HTML5 document safe to push to a digital-signage player.
 The `dmbr-cli` crate is a thin wrapper that reads the three JSON inputs (from
 files or stdin) and prints the `LayoutOutput` JSON to stdout.
 
+The `dmbr-convert` crate runs the engine directly on the **challenge input
+format** (the `Resources/` files): it reads the nested `menu.json`, a
+`configs/*.json` wall, and a `states/*.json` day-state, adapts them to the
+engine schema (resolving out-of-stock and day/time category availability),
+renders, and writes one standalone HTML file per screen plus an `index.html`
+launcher. **This is the entry point for the live demo — see
+[Running on the challenge data](#running-on-the-challenge-data).**
+
+### Density and deterministic cycling
+
+The full Saffron Junction menu (≈300 items) fits statically on the larger walls
+(`wall`, `totem`) but is physically denser than a single landscape or 2-screen
+wall can show at a legible size. For those configs the renderer splits each
+over-dense screen into capacity-sized **pages** and cross-fades them on a fixed,
+input-seeded CSS timeline (`@keyframes`, no JavaScript, no clock, no
+randomness). Every available item is shown legibly during the cycle, nothing is
+clipped, and the rendered HTML — and its `render_hash` — is byte-identical on
+every run. See [`COSTS.md`](COSTS.md) for the economics (zero AI per change).
+
 ### Pipeline stages
 
 1. **Meal period** — Resolves the active meal period from `DayState.timestamp`
@@ -63,10 +82,11 @@ files or stdin) and prints the `LayoutOutput` JSON to stdout.
 
 ## Crate overview
 
-| Crate       | Kind    | Responsibility                                                        |
-|-------------|---------|-----------------------------------------------------------------------|
-| `dmbr-core` | library | Data models, rules pipeline, layout engine, HTML renderer, hashing.   |
-| `dmbr-cli`  | binary  | CLI front-end: parses args/JSON, runs `dmbr-core`, prints the output. |
+| Crate          | Kind    | Responsibility                                                              |
+|----------------|---------|-----------------------------------------------------------------------------|
+| `dmbr-core`    | library | Data models, rules pipeline, layout engine, pagination, HTML renderer, hash.|
+| `dmbr-cli`     | binary  | CLI front-end for the engine's native schema; prints `LayoutOutput` JSON.   |
+| `dmbr-convert` | binary  | Runs the engine on the **challenge** `Resources/` format; writes HTML files.|
 
 ## Build
 
@@ -74,7 +94,40 @@ files or stdin) and prints the `LayoutOutput` JSON to stdout.
 cargo build --release
 ```
 
-## Run
+## Running on the challenge data
+
+`dmbr-convert` is the demo entry point. Point it at the provided `Resources/`
+files — any of the six configs, any state — and it writes one HTML file per
+screen plus an `index.html` launcher, then (with `--open`) opens the launcher in
+your browser. Each screen page is sized to that screen's exact resolution.
+
+```sh
+# from the buildathon-submission/ directory, after `cargo build --release`
+./target/release/dmbr-convert \
+  --menu   ../Resources/menu.json \
+  --config ../Resources/configs/wall.json \
+  --state  ../Resources/states/weekday-lunch-rush.json \
+  --out    out/wall-lunch \
+  --open
+```
+
+Swap `--config` for any of `solo | duo | wall | tower | twins | totem` and
+`--state` for any of `weekday-morning | weekday-lunch-rush | weekend-evening`.
+Open each `out/<dir>/screen-*.html` in a browser window at the screen's native
+resolution (the launcher lists them with their dimensions).
+
+| Flag             | Description                                            |
+|------------------|--------------------------------------------------------|
+| `--menu <file>`  | Challenge `menu.json`.                                 |
+| `--config <file>`| A `configs/*.json` wall.                               |
+| `--state <file>` | A `states/*.json` day-state.                           |
+| `--out <dir>`    | Output directory (created if absent; default `out`).   |
+| `--open`         | Open the generated `index.html` in the browser.        |
+
+The same inputs always produce byte-identical HTML and the same `render_hash`
+printed to stderr — run it twice and diff the files to confirm.
+
+## Run (native schema)
 
 The CLI accepts three input files:
 

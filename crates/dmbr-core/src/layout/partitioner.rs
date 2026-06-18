@@ -3,9 +3,10 @@
 use crate::layout::capacity::{CATEGORY_HEADER_HEIGHT_PX, ITEM_SLOT_HEIGHT_PX};
 use crate::pipeline::CategoryWithItems;
 
-/// Overflow factor: a screen may exceed its target weight by up to 15% before
-/// the partitioner rolls over to the next screen.
-const OVERFLOW_FACTOR_NUM: u32 = 115;
+/// Overflow factor: a screen may exceed its target weight by up to 6% before
+/// the partitioner rolls over to the next screen. Kept tight so no single
+/// screen drifts far past its slot budget and clips.
+const OVERFLOW_FACTOR_NUM: u32 = 106;
 const OVERFLOW_FACTOR_DEN: u32 = 100;
 
 /// Rendered weight of a category fragment in pixels: its header plus its items.
@@ -105,6 +106,7 @@ mod tests {
                 available: true,
                 display_order: i as i64,
                 description: None,
+                price_display: None,
             })
             .collect();
         CategoryWithItems {
