@@ -1,0 +1,16 @@
+[package]
+name = "dmbr-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command-line interface for the Digital Menu Board Layout Renderer."
+
+[[bin]]
+name = "dmbr-cli"
+path = "src/main.rs"
+
+[dependencies]
+dmbr-core = { path = "../dmbr-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
