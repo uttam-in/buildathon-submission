@@ -26,3 +26,4 @@ pub mod renderer;
 
 pub use error::{RenderError, Result};
 pub use models::{DayState, FullMenu, LayoutOutput, ScreenConfig};
+pub use renderer::render;
