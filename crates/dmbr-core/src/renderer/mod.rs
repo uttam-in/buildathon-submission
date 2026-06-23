@@ -98,7 +98,24 @@ pub fn render(
         // is denser than one screen can hold (e.g. the whole menu on a single
         // landscape screen), the pages cycle deterministically via CSS so every
         // item is shown legibly without clipping.
-        let page_cap = capacity.total_slots.max(1) as usize;
+        //
+        // A featured photo rail (shown when this screen has any photo-bearing
+        // item) consumes ~24-26% of the content area, so the menu columns have
+        // less room. Reduce the per-page capacity by a matching factor first so
+        // the listing still fits beside the rail — keeping the no-clip
+        // guarantee. The renderer applies the same "has a photo?" rule, so the
+        // two always agree.
+        let has_photo = slots
+            .iter()
+            .flat_map(|g| g.items.iter())
+            .any(|i| i.image.is_some());
+        let full_cap = capacity.total_slots.max(1) as usize;
+        let page_cap = if has_photo {
+            // Conservative: rail + its gutter/title leave ~70% for the columns.
+            (full_cap * 70 / 100).max(1)
+        } else {
+            full_cap
+        };
         let pages = paginate(slots, page_cap);
         if pages.len() > 1 {
             // Not a failure: the screen shows everything by cycling. Surfaced

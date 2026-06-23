@@ -97,6 +97,7 @@ mod tests {
                     display_order: i as i64,
                     description: None,
                     price_display: None,
+                    image: None,
                 })
                 .collect(),
             continued: false,

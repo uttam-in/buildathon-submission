@@ -166,6 +166,7 @@ pub fn adapt(
                 display_order: item_idx as i64,
                 description: item.description.clone(),
                 price_display,
+                image: item.image.clone(),
             });
         }
     }

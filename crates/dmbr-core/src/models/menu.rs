@@ -42,6 +42,10 @@ pub struct MenuItem {
     /// cannot.
     #[serde(default)]
     pub price_display: Option<String>,
+    /// Optional image URL (a food photo). When present the renderer may show a
+    /// thumbnail beside the item and consider it for the featured rail.
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 /// A time-window rule selecting which categories are shown during a meal period.

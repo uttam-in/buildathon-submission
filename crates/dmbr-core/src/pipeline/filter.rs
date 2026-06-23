@@ -77,6 +77,7 @@ mod tests {
             display_order: 1,
             description: None,
             price_display: None,
+            image: None,
         }
     }
 

@@ -57,9 +57,19 @@ fn render_page_body(groups: &[CategoryWithItems]) -> String {
                 .clone()
                 .unwrap_or_else(|| format_price(item.price));
             let price = escape_html(&price_text);
+            // Small inline thumbnail when the item has a photo. Sized to the
+            // line box so it does not increase the row height (keeps the
+            // capacity model — and thus the no-clip guarantee — intact).
+            let thumb = match &item.image {
+                Some(url) => format!(
+                    "<img class=\"thumb\" src=\"{}\" alt=\"\" loading=\"lazy\">",
+                    escape_html(url)
+                ),
+                None => String::new(),
+            };
             let _ = write!(
                 body,
-                "<div class=\"menu-item\"><span class=\"item-name\">{name}</span>\
+                "<div class=\"menu-item\">{thumb}<span class=\"item-name\">{name}</span>\
                  <span class=\"leader\"></span>\
                  <span class=\"item-price\">{price}</span></div>"
             );
@@ -67,6 +77,57 @@ fn render_page_body(groups: &[CategoryWithItems]) -> String {
         body.push_str("</section>");
     }
     body
+}
+
+/// Maximum photo cards in the featured strip.
+const MAX_FEATURED: usize = 3;
+
+/// Builds the "Today's Features" strip: up to [`MAX_FEATURED`] photo-bearing
+/// items, chosen deterministically (first in canonical order) from the screen's
+/// content. Items reaching the renderer are already in-stock and in-window, so
+/// the featured picks never show an 86'd item. Returns empty when no item on
+/// this screen has a photo.
+fn featured_strip(pages: &[Vec<CategoryWithItems>]) -> String {
+    let mut cards = String::new();
+    let mut count = 0;
+    'outer: for page in pages {
+        for group in page {
+            for item in &group.items {
+                let Some(url) = &item.image else { continue };
+                let name = escape_html(&item.name);
+                let price = escape_html(
+                    &item
+                        .price_display
+                        .clone()
+                        .unwrap_or_else(|| format_price(item.price)),
+                );
+                let cat = escape_html(&group.category.name);
+                let _ = write!(
+                    cards,
+                    "<div class=\"feat-card\">\
+<div class=\"feat-img\" style=\"background-image:url('{url}')\"></div>\
+<div class=\"feat-meta\"><span class=\"feat-tag\">{cat}</span>\
+<span class=\"feat-name\">{name}</span>\
+<span class=\"feat-price\">{price}</span></div></div>",
+                    url = escape_html(url),
+                    cat = cat,
+                    name = name,
+                    price = price,
+                );
+                count += 1;
+                if count >= MAX_FEATURED {
+                    break 'outer;
+                }
+            }
+        }
+    }
+    if cards.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<aside class=\"featured\"><div class=\"feat-title\">Today's Features</div>\
+<div class=\"feat-list\">{cards}</div></aside>"
+    )
 }
 
 /// Seconds each page is held before cycling to the next.
@@ -157,6 +218,25 @@ pub fn render_screen(
         );
     }
     let cycle = cycle_css(page_count);
+    let featured = featured_strip(pages);
+    // Portrait walls are narrow: lay the feature strip across the top; landscape
+    // walls get a left rail. Chosen from geometry so it is deterministic.
+    let is_portrait = screen.height_px > screen.width_px;
+    let stage_dir = if is_portrait { "column" } else { "row" };
+    // Featured area: a left rail (~24% width) on landscape, or a top strip
+    // (~26% height) on portrait. Cards stack vertically in a rail, horizontally
+    // in a strip.
+    let (feat_axis, feat_list_dir) = if is_portrait {
+        (
+            format!("height:{}px;", (screen.height_px * 26 / 100)),
+            "flex-direction:row;".to_string(),
+        )
+    } else {
+        (
+            format!("width:{}px;", (screen.width_px * 24 / 100)),
+            "flex-direction:column;".to_string(),
+        )
+    };
 
     let title = escape_html(&meta.title);
     let subtitle = escape_html(&meta.subtitle);
@@ -182,8 +262,25 @@ border-bottom:3px solid #c8862f;padding-bottom:14px;margin-bottom:18px;flex:none
 color:#fbf5ea;}}\n\
 .period{{font-size:{period_font}px;font-weight:600;text-transform:uppercase;\
 letter-spacing:0.16em;color:#e7b15a;}}\n\
-.content{{position:relative;flex:1;min-height:0;overflow:hidden;}}\n\
+.stage{{flex:1;min-height:0;display:flex;flex-direction:{stage_dir};gap:{gutter}px;}}\n\
+.content{{position:relative;flex:1;min-height:0;min-width:0;overflow:hidden;}}\n\
 .cols{{column-count:{columns};column-gap:{gutter}px;height:100%;overflow:hidden;}}\n\
+.featured{{flex:none;display:flex;flex-direction:column;min-height:0;{feat_axis}}}\n\
+.feat-title{{flex:none;font-size:{cat_font}px;font-weight:800;color:#e7b15a;\
+text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;}}\n\
+.feat-list{{flex:1 1 auto;min-height:0;display:flex;{feat_list_dir}gap:14px;}}\n\
+.feat-card{{flex:1 1 0;display:flex;flex-direction:column;background:#181410;\
+border:1px solid #3a2e1f;border-radius:14px;overflow:hidden;min-height:0;}}\n\
+.feat-img{{flex:1 1 auto;min-height:90px;background-size:cover;\
+background-position:center;}}\n\
+.feat-meta{{padding:10px 12px;display:flex;flex-direction:column;gap:3px;flex:none;}}\n\
+.feat-tag{{font-size:{footer_font}px;text-transform:uppercase;letter-spacing:0.1em;\
+color:#9b8b73;}}\n\
+.feat-name{{font-size:{item_font}px;font-weight:700;color:#fbf5ea;line-height:1.15;}}\n\
+.feat-price{{font-family:{mono_stack};font-weight:700;color:#f4c87a;\
+font-size:{item_font}px;}}\n\
+.thumb{{flex:none;width:1.5em;height:1.5em;object-fit:cover;border-radius:5px;\
+margin-right:9px;align-self:center;}}\n\
 .pageno{{position:absolute;right:0;bottom:0;font-size:{footer_font}px;\
 color:#7a6c57;letter-spacing:0.08em;}}\n\
 {cycle}\n\
@@ -206,7 +303,7 @@ font-size:{footer_font}px;color:#7a6c57;letter-spacing:0.08em;flex:none;}}\n\
 </style>\n</head>\n<body>\n\
 <div class=\"board\">\n\
 <header class=\"header\"><span class=\"brand\">{title}</span>{subtitle_html}</header>\n\
-<main class=\"content\">{body}</main>\n\
+<div class=\"stage\">{featured}<main class=\"content\">{body}</main></div>\n\
 <footer class=\"footer\">{title} · {screen_id}</footer>\n\
 </div>\n</body>\n</html>",
         width = screen.width_px,
@@ -229,6 +326,10 @@ font-size:{footer_font}px;color:#7a6c57;letter-spacing:0.08em;flex:none;}}\n\
         item_font = font_size_px,
         item_pad = 2,
         cycle = cycle,
+        stage_dir = stage_dir,
+        feat_axis = feat_axis,
+        feat_list_dir = feat_list_dir,
+        featured = featured,
         body = body,
     )
 }
@@ -265,6 +366,7 @@ mod tests {
                 display_order: 1,
                 description: None,
                 price_display: None,
+                image: None,
             }],
             continued: false,
         }

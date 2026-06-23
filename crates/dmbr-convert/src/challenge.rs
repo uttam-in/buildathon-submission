@@ -28,10 +28,9 @@ pub struct ChallengeItem {
     /// Range price (when the item is sold by size).
     #[serde(default, rename = "priceRange")]
     pub price_range: Option<PriceRange>,
-    /// Optional stock photo URL. Parsed for forward-compatibility (a featured
-    /// photo zone); the current renderer is text-only, so it is not yet read.
+    /// Optional stock photo URL, carried through to the renderer for inline
+    /// thumbnails and the featured rail.
     #[serde(default)]
-    #[allow(dead_code)]
     pub image: Option<String>,
     /// Optional short description.
     #[serde(default)]
