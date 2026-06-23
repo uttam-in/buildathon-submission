@@ -82,17 +82,72 @@ every run. See [`COSTS.md`](COSTS.md) for the economics (zero AI per change).
 
 ## Crate overview
 
-| Crate          | Kind    | Responsibility                                                              |
-|----------------|---------|-----------------------------------------------------------------------------|
-| `dmbr-core`    | library | Data models, rules pipeline, layout engine, pagination, HTML renderer, hash.|
-| `dmbr-cli`     | binary  | CLI front-end for the engine's native schema; prints `LayoutOutput` JSON.   |
-| `dmbr-convert` | binary  | Runs the engine on the **challenge** `Resources/` format; writes HTML files.|
+| Crate                | Kind    | Responsibility                                                              |
+|----------------------|---------|-----------------------------------------------------------------------------|
+| `dmbr-core`          | library | Data models, rules pipeline, layout engine, pagination, HTML renderer, hash.|
+| `dmbr-cli`           | binary  | CLI front-end for the engine's native schema; prints `LayoutOutput` JSON.   |
+| `dmbr-convert`       | binary  | Runs the engine on the **challenge** `Resources/` format; writes HTML files.|
+| `dmbr-web`           | library | Shared web logic: file loading, render helpers, picker/gallery HTML, Postgres data layer (stores/screens/admin), admin pages. Also the `dmbr-migrate` bin. |
+| `dmbr-server-axum`   | binary  | **Axum** HTTP server: serves boards as live pages **and** the Postgres-backed admin UI for stores + screen monitors. |
+| `dmbr-server-actix`  | binary  | **Actix Web** HTTP server: serves the same boards (DB-free renderer demo).  |
 
 ## Build
 
 ```sh
 cargo build --release
 ```
+
+## Web servers
+
+Two interchangeable HTTP servers render the boards as live webpages (read the
+`Resources/` files fresh per request — edit a state and refresh to see the wall
+reflow). Both share their logic via `dmbr-web`:
+
+```sh
+# Axum (default port 8080) — also hosts the admin UI (see below)
+RESOURCES_DIR=../Resources cargo run -p dmbr-server-axum
+
+# Actix Web (default port 8081) — DB-free renderer
+RESOURCES_DIR=../Resources cargo run -p dmbr-server-actix
+```
+
+Routes (both servers): `GET /` (config picker) · `GET /config/{config}` ·
+`GET /board/{config}/{state}` (gallery) ·
+`GET /screen/{config}/{state}/{screen}` (one screen at native resolution).
+
+## Admin app (Postgres-backed)
+
+The Axum server adds a management UI to add/edit **stores** and their **screen
+monitors**, behind an admin login. A store's set of monitors *is* its wall
+configuration — `GET /store/{slug}` renders that store's wall live.
+
+Only stores, monitors, and admin users live in Postgres (schema `menuboard`);
+the menu and day-states are still read from `Resources/` files (no menu DB).
+
+**One-time setup** — create the schema and seed an admin:
+
+```sh
+DATABASE_URL=postgres://… \
+ADMIN_USER=admin ADMIN_PASSWORD=change-me \
+cargo run -p dmbr-web --bin dmbr-migrate
+```
+
+Schema (`migrations/0001_menuboard.sql`): `menuboard.stores`,
+`menuboard.screens`, `menuboard.admin_users` (Argon2-hashed passwords).
+
+**Run the server with the DB wired:**
+
+```sh
+DATABASE_URL=postgres://… \
+SESSION_SECRET=some-long-random-string \
+RESOURCES_DIR=../Resources \
+cargo run -p dmbr-server-axum
+```
+
+Then open `http://localhost:8080/admin` and sign in. Admin routes:
+`/admin/login` · `/admin/logout` · `/admin/stores` (list + create) ·
+`/admin/stores/{id}` (edit store + manage its monitors). Sessions are
+HMAC-signed cookies (`SESSION_SECRET`); no server-side session store.
 
 ## Running on the challenge data
 

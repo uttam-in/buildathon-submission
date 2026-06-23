@@ -7,9 +7,6 @@
 //! the engine, and writes one standalone HTML file per screen plus an
 //! `index.html` launcher. The render is byte-identical for identical inputs.
 
-mod adapt;
-mod challenge;
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -17,8 +14,8 @@ use std::process::ExitCode;
 use clap::Parser;
 use serde::Deserialize;
 
-use crate::adapt::adapt;
-use crate::challenge::{ChallengeConfig, ChallengeMenu, ChallengeState};
+use dmbr_convert::adapt::adapt;
+use dmbr_convert::challenge::{ChallengeConfig, ChallengeMenu, ChallengeState};
 
 /// Render menu boards from the challenge input format.
 #[derive(Parser, Debug)]

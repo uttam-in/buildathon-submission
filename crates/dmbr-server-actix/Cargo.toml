@@ -1,0 +1,13 @@
+[package]
+name = "dmbr-server-actix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dmbr-server-actix"
+path = "src/main.rs"
+
+[dependencies]
+dmbr-web = { path = "../dmbr-web" }
+actix-web = "4"
