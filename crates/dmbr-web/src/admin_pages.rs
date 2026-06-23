@@ -131,8 +131,16 @@ pub fn store_edit_page(store: &Store, screens: &[Screen], states: &[Entry]) -> S
         );
     }
     for sc in screens {
-        let land = if sc.orientation == "landscape" { " selected" } else { "" };
-        let port = if sc.orientation == "portrait" { " selected" } else { "" };
+        let land = if sc.orientation == "landscape" {
+            " selected"
+        } else {
+            ""
+        };
+        let port = if sc.orientation == "portrait" {
+            " selected"
+        } else {
+            ""
+        };
         screen_rows.push_str(&format!(
             "<tr><td colspan=\"4\"><form method=\"post\" \
 action=\"/admin/screens/{id}/update\"><div class=\"row\">\
@@ -205,7 +213,7 @@ pub fn menu_page(categories: &[(MenuCategoryRow, i64)]) -> String {
     }
     for (c, item_count) in categories {
         let avail = match (c.avail_from.as_deref(), c.avail_to.as_deref()) {
-            (Some(f), Some(t)) => format!("{f}–{t}"),
+            (Some(f), Some(t)) => format!("{}–{}", esc(f), esc(t)),
             _ => "—".to_string(),
         };
         let days = if c.avail_days.is_empty() {

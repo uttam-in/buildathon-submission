@@ -15,13 +15,10 @@
 pub mod admin_pages;
 pub mod db;
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use dmbr_convert::adapt::adapt;
-use dmbr_convert::challenge::{
-    ChallengeConfig, ChallengeMenu, ChallengeScreen, ChallengeState,
-};
+use dmbr_convert::challenge::{ChallengeConfig, ChallengeMenu, ChallengeScreen, ChallengeState};
 use dmbr_core::models::LayoutOutput;
 
 /// An error serving a board, with an HTTP-friendly classification.
@@ -69,20 +66,22 @@ pub struct Resources {
     root: PathBuf,
 }
 
-/// Reads the optional top-level `"name"` string from a JSON file.
-fn read_name(path: &Path) -> Option<String> {
-    let text = fs::read_to_string(path).ok()?;
+/// Reads the optional top-level `"name"` string from a JSON file (async,
+/// non-blocking).
+async fn read_name(path: &Path) -> Option<String> {
+    let text = tokio::fs::read_to_string(path).await.ok()?;
     let value: serde_json::Value = serde_json::from_str(&text).ok()?;
     value.get("name")?.as_str().map(|s| s.to_string())
 }
 
-/// Lists `*.json` files in `dir` as [`Entry`]s, sorted by key.
-fn list_entries(dir: &Path) -> Vec<Entry> {
+/// Lists `*.json` files in `dir` as [`Entry`]s, sorted by key (async,
+/// non-blocking).
+async fn list_entries(dir: &Path) -> Vec<Entry> {
     let mut out = Vec::new();
-    let Ok(read) = fs::read_dir(dir) else {
+    let Ok(mut read) = tokio::fs::read_dir(dir).await else {
         return out;
     };
-    for entry in read.flatten() {
+    while let Ok(Some(entry)) = read.next_entry().await {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
@@ -90,8 +89,11 @@ fn list_entries(dir: &Path) -> Vec<Entry> {
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let name = read_name(&path).unwrap_or_else(|| stem.to_string());
-        out.push(Entry { key: stem.to_string(), name });
+        let name = read_name(&path).await.unwrap_or_else(|| stem.to_string());
+        out.push(Entry {
+            key: stem.to_string(),
+            name,
+        });
     }
     out.sort_by(|a, b| a.key.cmp(&b.key));
     out
@@ -103,22 +105,34 @@ impl Resources {
         Self { root: root.into() }
     }
 
-    /// Discovers the available configs and states.
-    pub fn catalog(&self) -> Catalog {
+    /// Discovers the available configs and states (async, non-blocking).
+    pub async fn catalog(&self) -> Catalog {
         Catalog {
-            configs: list_entries(&self.root.join("configs")),
-            states: list_entries(&self.root.join("states")),
+            configs: list_entries(&self.root.join("configs")).await,
+            states: list_entries(&self.root.join("states")).await,
         }
     }
 
     /// Loads `menu.json`, the named config, and the named state, then adapts and
     /// renders the full board. Files are read fresh on every call.
-    pub fn render(&self, config_key: &str, state_key: &str) -> Result<LayoutOutput, WebError> {
-        let menu: ChallengeMenu = self.load_json(&self.root.join("menu.json"))?;
-        let config: ChallengeConfig =
-            self.load_json(&self.root.join("configs").join(format!("{config_key}.json")))?;
-        let state: ChallengeState =
-            self.load_json(&self.root.join("states").join(format!("{state_key}.json")))?;
+    pub async fn render(
+        &self,
+        config_key: &str,
+        state_key: &str,
+    ) -> Result<LayoutOutput, WebError> {
+        if !valid_key(config_key) {
+            return Err(WebError::NotFound(format!("config '{config_key}'")));
+        }
+        if !valid_key(state_key) {
+            return Err(WebError::NotFound(format!("state '{state_key}'")));
+        }
+        let menu: ChallengeMenu = self.load_json(&self.root.join("menu.json")).await?;
+        let config: ChallengeConfig = self
+            .load_json(&self.root.join("configs").join(format!("{config_key}.json")))
+            .await?;
+        let state: ChallengeState = self
+            .load_json(&self.root.join("states").join(format!("{state_key}.json")))
+            .await?;
 
         let adapted = adapt(&menu, &config, &state)
             .map_err(|e| WebError::Internal(format!("adapt failed: {e}")))?;
@@ -127,13 +141,13 @@ impl Resources {
     }
 
     /// Renders a board and returns the HTML for a single screen by id.
-    pub fn render_screen(
+    pub async fn render_screen(
         &self,
         config_key: &str,
         state_key: &str,
         screen_id: &str,
     ) -> Result<String, WebError> {
-        let output = self.render(config_key, state_key)?;
+        let output = self.render(config_key, state_key).await?;
         output
             .screens
             .into_iter()
@@ -147,14 +161,18 @@ impl Resources {
     /// `state_key`. `screens` is `(id, orientation, width_px, height_px)` in
     /// wall order. Falls back to the menu's restaurant name in the header via
     /// the adapter, but callers can override the display title afterward.
-    pub fn render_store_screens(
+    pub async fn render_store_screens(
         &self,
         state_key: &str,
         screens: &[(String, String, u32, u32)],
     ) -> Result<LayoutOutput, WebError> {
-        let menu: ChallengeMenu = self.load_json(&self.root.join("menu.json"))?;
-        let state: ChallengeState =
-            self.load_json(&self.root.join("states").join(format!("{state_key}.json")))?;
+        if !valid_key(state_key) {
+            return Err(WebError::NotFound(format!("state '{state_key}'")));
+        }
+        let menu: ChallengeMenu = self.load_json(&self.root.join("menu.json")).await?;
+        let state: ChallengeState = self
+            .load_json(&self.root.join("states").join(format!("{state_key}.json")))
+            .await?;
 
         let config = ChallengeConfig {
             name: Some("store".into()),
@@ -187,8 +205,12 @@ impl Resources {
         restaurant_id: &str,
         screens: &[(String, String, u32, u32)],
     ) -> Result<LayoutOutput, WebError> {
-        let state: ChallengeState =
-            self.load_json(&self.root.join("states").join(format!("{state_key}.json")))?;
+        if !valid_key(state_key) {
+            return Err(WebError::NotFound(format!("state '{state_key}'")));
+        }
+        let state: ChallengeState = self
+            .load_json(&self.root.join("states").join(format!("{state_key}.json")))
+            .await?;
 
         let menu = crate::db::build_full_menu(pool, restaurant_id, &state.day, &state.time)
             .await
@@ -201,9 +223,13 @@ impl Resources {
             .map_err(|e| WebError::Internal(format!("render failed: {e}")))
     }
 
-    /// Reads and deserializes a JSON file, mapping a missing file to a 404.
-    fn load_json<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<T, WebError> {
-        let text = fs::read_to_string(path).map_err(|e| {
+    /// Reads and deserializes a JSON file (async, non-blocking), mapping a
+    /// missing file to a 404.
+    async fn load_json<T: for<'de> serde::Deserialize<'de>>(
+        &self,
+        path: &Path,
+    ) -> Result<T, WebError> {
+        let text = tokio::fs::read_to_string(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 WebError::NotFound(format!("{}", path.display()))
             } else {
@@ -215,12 +241,13 @@ impl Resources {
     }
 }
 
-/// HTML-escapes text for safe interpolation into the picker/gallery pages.
+/// HTML-escapes text for safe interpolation into HTML markup and attribute
+/// values. Escapes all five significant characters, including the single quote
+/// (`'`), so values are safe inside single-quoted attributes and inline JS
+/// string arguments. Delegates to the engine's `escape_html` for one source of
+/// truth.
 pub(crate) fn esc(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+    dmbr_core::escape_html(s)
 }
 
 /// Shared page chrome: a dark page with a title, wrapping `body`.
@@ -338,6 +365,18 @@ pub fn find_entry<'a>(entries: &'a [Entry], key: &str) -> Option<&'a Entry> {
     entries.iter().find(|e| e.key == key)
 }
 
+/// Whether a config/state key is a safe single path segment: non-empty and made
+/// only of ASCII alphanumerics, `-`, or `_`. Rejects anything that could
+/// traverse the filesystem (`/`, `\`, `.`, absolute paths) before it is joined
+/// into a `Resources/` path.
+fn valid_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 128
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// Builds an engine `ScreenConfig` from `(screen_id, orientation, w, h)` tuples
 /// laid out in a single row (every provided wall is one orientation).
 fn build_screen_config(
@@ -362,7 +401,10 @@ fn build_screen_config(
     }
     Ok(ScreenConfig {
         screen_count: screens.len() as u8,
-        arrangement: Arrangement { columns: (screens.len() as u32).max(1), rows: 1 },
+        arrangement: Arrangement {
+            columns: (screens.len() as u32).max(1),
+            rows: 1,
+        },
         screens: defs,
     })
 }
@@ -401,7 +443,10 @@ mod tests {
     #[test]
     fn picker_lists_configs() {
         let cat = Catalog {
-            configs: vec![Entry { key: "wall".into(), name: "wall".into() }],
+            configs: vec![Entry {
+                key: "wall".into(),
+                name: "wall".into(),
+            }],
             states: vec![],
         };
         let html = picker_page(&cat);

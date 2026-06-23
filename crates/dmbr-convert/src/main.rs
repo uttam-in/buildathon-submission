@@ -47,7 +47,13 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T, String> {
 /// Slugifies a screen id into a safe filename stem.
 fn safe_stem(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
@@ -113,7 +119,9 @@ a:hover{{border-color:#d4773a;transform:translateY(-2px);}}\n\
 fn open_in_browser(path: &Path) {
     let p = path.to_string_lossy().to_string();
     let result = if cfg!(target_os = "windows") {
-        std::process::Command::new("cmd").args(["/C", "start", "", &p]).spawn()
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &p])
+            .spawn()
     } else if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(&p).spawn()
     } else {

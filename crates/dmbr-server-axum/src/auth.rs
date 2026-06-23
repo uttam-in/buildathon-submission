@@ -19,7 +19,9 @@ pub struct SessionKey {
 impl SessionKey {
     /// Creates a key from raw secret bytes.
     pub fn new(secret: &[u8]) -> Self {
-        Self { secret: secret.to_vec() }
+        Self {
+            secret: secret.to_vec(),
+        }
     }
 
     /// Computes the hex HMAC of `msg`.

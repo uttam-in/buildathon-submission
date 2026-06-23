@@ -151,7 +151,7 @@ but skips menu seeding once the tables are populated. Migrations:
 
 ```sh
 DATABASE_URL=postgres://… \
-SESSION_SECRET=some-long-random-string \
+SESSION_SECRET=a-long-random-string-at-least-32-chars \
 RESOURCES_DIR=../Resources \
 cargo run -p dmbr-server-axum
 ```
@@ -161,8 +161,9 @@ Then open `http://localhost:8080/admin` and sign in. Admin routes:
 `/admin/stores/{id}` (edit store + monitors) · `/admin/menu` (categories) ·
 `/admin/menu/{id}` (edit a category + full item CRUD, incl. in-stock and
 featured toggles). Editing the menu changes every store's wall on next refresh.
-Sessions are HMAC-signed cookies (`SESSION_SECRET`); no server-side session
-store.
+Sessions are HMAC-signed cookies; no server-side session store. The server
+**refuses to start** unless `SESSION_SECRET` is set and at least 32 characters
+(a short or absent secret would let anyone forge admin cookies).
 
 ### Today's Features
 

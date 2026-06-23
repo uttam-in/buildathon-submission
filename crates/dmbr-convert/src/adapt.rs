@@ -26,7 +26,10 @@ impl std::fmt::Display for AdaptError {
         match self {
             AdaptError::BadTime(s) => write!(f, "invalid time '{s}', expected HH:MM"),
             AdaptError::BadOrientation(s) => {
-                write!(f, "invalid orientation '{s}', expected landscape or portrait")
+                write!(
+                    f,
+                    "invalid orientation '{s}', expected landscape or portrait"
+                )
             }
         }
     }
@@ -36,7 +39,9 @@ impl std::error::Error for AdaptError {}
 
 /// Parses `HH:MM` into minutes since midnight.
 fn parse_hhmm(s: &str) -> Result<u32, AdaptError> {
-    let (h, m) = s.split_once(':').ok_or_else(|| AdaptError::BadTime(s.into()))?;
+    let (h, m) = s
+        .split_once(':')
+        .ok_or_else(|| AdaptError::BadTime(s.into()))?;
     let h: u32 = h.parse().map_err(|_| AdaptError::BadTime(s.into()))?;
     let m: u32 = m.parse().map_err(|_| AdaptError::BadTime(s.into()))?;
     if h > 23 || m > 59 {
@@ -93,10 +98,10 @@ fn format_range(r: &PriceRange) -> String {
 /// from the wall-clock minute-of-day (deterministic; cosmetic only).
 fn period_label(now_minutes: u32) -> &'static str {
     match now_minutes {
-        m if m < 11 * 60 => "Breakfast",   // before 11:00
-        m if m < 17 * 60 => "Lunch",       // 11:00–17:00
-        m if m < 22 * 60 => "Dinner",      // 17:00–22:00
-        _ => "Late Night",                  // 22:00 onward
+        m if m < 11 * 60 => "Breakfast", // before 11:00
+        m if m < 17 * 60 => "Lunch",     // 11:00–17:00
+        m if m < 22 * 60 => "Dinner",    // 17:00–22:00
+        _ => "Late Night",               // 22:00 onward
     }
 }
 
@@ -118,7 +123,10 @@ pub struct Adapted {
 /// Every provided wall is a single orientation laid out in one row, so the
 /// grid is 1×n.
 fn arrangement_for(n: u32) -> Arrangement {
-    Arrangement { columns: n.max(1), rows: 1 }
+    Arrangement {
+        columns: n.max(1),
+        rows: 1,
+    }
 }
 
 /// Converts a challenge orientation string into the engine enum.
@@ -291,7 +299,10 @@ mod tests {
     fn price_range_becomes_display_string() {
         let mut it = item("platter");
         it.price = None;
-        it.price_range = Some(PriceRange { min: 19.99, max: 79.99 });
+        it.price_range = Some(PriceRange {
+            min: 19.99,
+            max: 79.99,
+        });
         let menu = menu_with(vec![ChallengeCategory {
             id: "c1".into(),
             name: "Platters".into(),
@@ -301,7 +312,10 @@ mod tests {
         let out = adapt(&menu, &config_solo(), &state("wed", "12:00", &[])).unwrap();
         let mapped = &out.menu.items[0];
         assert_eq!(mapped.price, 19.99);
-        assert_eq!(mapped.price_display.as_deref(), Some("$19.99\u{2013}$79.99"));
+        assert_eq!(
+            mapped.price_display.as_deref(),
+            Some("$19.99\u{2013}$79.99")
+        );
     }
 
     #[test]

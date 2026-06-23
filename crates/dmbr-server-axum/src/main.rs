@@ -36,7 +36,9 @@ use axum::{
 use dmbr_web::admin_pages::{
     category_edit_page, login_page, menu_page, store_edit_page, stores_page,
 };
-use dmbr_web::{config_page, db, find_entry, gallery_page, picker_page, Entry, Resources, WebError};
+use dmbr_web::{
+    config_page, db, find_entry, gallery_page, picker_page, Entry, Resources, WebError,
+};
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -62,7 +64,12 @@ async fn main() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_PORT);
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let secret = env::var("SESSION_SECRET").unwrap_or_else(|_| "dev-insecure-secret".into());
+    // Refuse to start without a real session secret: a known/short key lets
+    // anyone forge admin cookies. No insecure fallback.
+    let secret = env::var("SESSION_SECRET")
+        .ok()
+        .filter(|s| s.len() >= 32)
+        .expect("SESSION_SECRET must be set and at least 32 characters");
 
     let pool = db::connect(&database_url)
         .await
@@ -125,11 +132,11 @@ fn err_response(e: WebError) -> Response {
 // ---- Public renderer routes ------------------------------------------------
 
 async fn home(State(s): State<AppState>) -> Html<String> {
-    Html(picker_page(&s.resources.catalog()))
+    Html(picker_page(&s.resources.catalog().await))
 }
 
 async fn config(State(s): State<AppState>, Path(config): Path<String>) -> Response {
-    let catalog = s.resources.catalog();
+    let catalog = s.resources.catalog().await;
     match find_entry(&catalog.configs, &config) {
         Some(cfg) => Html(config_page(cfg, &catalog)).into_response(),
         None => err_response(WebError::NotFound(format!("config '{config}'"))),
@@ -140,14 +147,14 @@ async fn board(
     State(s): State<AppState>,
     Path((config, state)): Path<(String, String)>,
 ) -> Response {
-    let catalog = s.resources.catalog();
+    let catalog = s.resources.catalog().await;
     let (Some(cfg), Some(st)) = (
         find_entry(&catalog.configs, &config),
         find_entry(&catalog.states, &state),
     ) else {
         return err_response(WebError::NotFound(format!("{config}/{state}")));
     };
-    match s.resources.render(&config, &state) {
+    match s.resources.render(&config, &state).await {
         Ok(output) => Html(gallery_page(cfg, st, &output)).into_response(),
         Err(e) => err_response(e),
     }
@@ -157,7 +164,7 @@ async fn screen(
     State(s): State<AppState>,
     Path((config, state, screen)): Path<(String, String, String)>,
 ) -> Response {
-    match s.resources.render_screen(&config, &state, &screen) {
+    match s.resources.render_screen(&config, &state, &screen).await {
         Ok(html) => Html(html).into_response(),
         Err(e) => err_response(e),
     }
@@ -208,7 +215,7 @@ async fn store_wall(State(s): State<AppState>, Path(slug): Path<String>) -> Resp
                 "<body style='font-family:system-ui;background:#0e0b09;color:#f3ece1;padding:48px'>\
 <h1>{}</h1><p>No screen monitors configured for this store yet. \
 Add some in <a style='color:#f4c87a' href='/admin/stores'>admin</a>.</p></body>",
-                store.name
+                dmbr_core::escape_html(&store.name)
             )),
         )
             .into_response();
@@ -219,8 +226,14 @@ Add some in <a style='color:#f4c87a' href='/admin/stores'>admin</a>.</p></body>"
         .await
     {
         Ok(output) => {
-            let cfg = Entry { key: slug.clone(), name: store.name.clone() };
-            let st = Entry { key: store.state_key.clone(), name: store.state_key.clone() };
+            let cfg = Entry {
+                key: slug.clone(),
+                name: store.name.clone(),
+            };
+            let st = Entry {
+                key: store.state_key.clone(),
+                name: store.state_key.clone(),
+            };
             Html(store_gallery(&cfg, &st, &output)).into_response()
         }
         Err(e) => err_response(e),
@@ -240,7 +253,11 @@ async fn store_screen(
         .render_store_from_db(&s.pool, &store.state_key, &store.name, &screens)
         .await
     {
-        Ok(output) => match output.screens.into_iter().find(|sc| sc.screen_id == screen_id) {
+        Ok(output) => match output
+            .screens
+            .into_iter()
+            .find(|sc| sc.screen_id == screen_id)
+        {
             Some(sc) => Html(sc.html_content).into_response(),
             None => err_response(WebError::NotFound(format!("screen '{screen_id}'"))),
         },
@@ -262,8 +279,8 @@ href='/store/{slug}/{sid}' style='display:flex;flex-direction:column;gap:6px;\
 background:#181410;border:1px solid #3a2e1f;border-radius:14px;padding:20px;\
 text-decoration:none;color:#f4c87a'><span style='font-size:19px;font-weight:700;\
 color:#fbf5ea'>{sid}</span><span style='font-size:13px;color:#9a8f7d'>{n} items</span></a></li>",
-            slug = config.key,
-            sid = sc.screen_id,
+            slug = dmbr_core::escape_html(&config.key),
+            sid = dmbr_core::escape_html(&sc.screen_id),
             n = sc.item_count,
         ));
     }
@@ -275,10 +292,10 @@ color:#f3ece1;padding:48px;min-height:100vh'>\
 <p style='color:#9a8f7d'>{n} screen(s) · meal period: {period} · render_hash {hash}</p>\
 <ul style='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;\
 padding:0;margin-top:18px'>{cards}</ul></body></html>",
-        name = config.name,
+        name = dmbr_core::escape_html(&config.name),
         n = output.screens.len(),
-        period = state.name,
-        hash = output.render_hash,
+        period = dmbr_core::escape_html(&state.name),
+        hash = dmbr_core::escape_html(&output.render_hash),
         cards = cards,
     )
 }
@@ -291,9 +308,12 @@ fn current_admin(state: &AppState, headers: &HeaderMap) -> Option<String> {
     auth::session_user(&state.session, cookie)
 }
 
-/// Guards an admin handler: returns `Ok(user)` or a redirect to the login page.
-fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<String, Response> {
-    current_admin(state, headers).ok_or_else(|| Redirect::to("/admin/login").into_response())
+/// Guards an admin handler: returns `Ok(user)` or a boxed redirect to the login
+/// page. The `Err` is boxed because an axum `Response` is large and would
+/// otherwise bloat every guarded handler's `Result` (clippy `result_large_err`).
+fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<String, Box<Response>> {
+    current_admin(state, headers)
+        .ok_or_else(|| Box::new(Redirect::to("/admin/login").into_response()))
 }
 
 async fn login_form() -> Html<String> {
@@ -309,8 +329,17 @@ struct LoginForm {
 async fn login_submit(State(s): State<AppState>, Form(form): Form<LoginForm>) -> Response {
     if db::verify_admin(&s.pool, &form.username, &form.password).await {
         let cookie = auth::make_cookie(&s.session, &form.username);
+        // The cookie value embeds the username; if it can't form a valid header
+        // value (e.g. a non-ASCII username), fail closed rather than panic.
+        let Ok(value) = cookie.parse() else {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "500 — invalid session cookie",
+            )
+                .into_response();
+        };
         let mut headers = HeaderMap::new();
-        headers.insert(axum::http::header::SET_COOKIE, cookie.parse().unwrap());
+        headers.insert(axum::http::header::SET_COOKIE, value);
         (headers, Redirect::to("/admin/stores")).into_response()
     } else {
         (
@@ -323,10 +352,11 @@ async fn login_submit(State(s): State<AppState>, Form(form): Form<LoginForm>) ->
 
 async fn logout() -> Response {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        axum::http::header::SET_COOKIE,
-        auth::clear_cookie().parse().unwrap(),
-    );
+    // clear_cookie() is a fixed ASCII constant, so this never fails; handle it
+    // gracefully anyway to keep the handler panic-free.
+    if let Ok(value) = auth::clear_cookie().parse() {
+        headers.insert(axum::http::header::SET_COOKIE, value);
+    }
     (headers, Redirect::to("/admin/login")).into_response()
 }
 
@@ -334,7 +364,7 @@ async fn logout() -> Response {
 
 async fn admin_stores(State(s): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     match db::list_stores(&s.pool).await {
         Ok(stores) => Html(stores_page(&stores)).into_response(),
@@ -356,7 +386,7 @@ async fn admin_create_store(
     Form(f): Form<StoreForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     match db::create_store(&s.pool, &f.slug, &f.name, &f.timezone, &f.state_key).await {
         Ok(_) => Redirect::to("/admin/stores").into_response(),
@@ -370,15 +400,18 @@ async fn admin_store(
     Path(id): Path<Uuid>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     let store = match db::get_store(&s.pool, id).await {
         Ok(Some(st)) => st,
         Ok(None) => return err_response(WebError::NotFound(format!("store {id}"))),
         Err(e) => return err_response(WebError::Internal(e.to_string())),
     };
-    let screens = db::list_screens(&s.pool, id).await.unwrap_or_default();
-    let states = s.resources.catalog().states;
+    let screens = match db::list_screens(&s.pool, id).await {
+        Ok(v) => v,
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
+    let states = s.resources.catalog().await.states;
     Html(store_edit_page(&store, &screens, &states)).into_response()
 }
 
@@ -389,7 +422,7 @@ async fn admin_update_store(
     Form(f): Form<StoreForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     match db::update_store(&s.pool, id, &f.slug, &f.name, &f.timezone, &f.state_key).await {
         Ok(_) => Redirect::to(&format!("/admin/stores/{id}")).into_response(),
@@ -403,7 +436,7 @@ async fn admin_delete_store(
     Path(id): Path<Uuid>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     match db::delete_store(&s.pool, id).await {
         Ok(_) => Redirect::to("/admin/stores").into_response(),
@@ -430,10 +463,16 @@ async fn admin_create_screen(
     Form(f): Form<ScreenForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     match db::create_screen(
-        &s.pool, store_id, &f.label, &f.orientation, f.width_px, f.height_px, f.position,
+        &s.pool,
+        store_id,
+        &f.label,
+        &f.orientation,
+        f.width_px,
+        f.height_px,
+        f.position,
     )
     .await
     {
@@ -449,17 +488,20 @@ async fn admin_update_screen(
     Form(f): Form<ScreenForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
-    let store_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT store_id FROM menuboard.screens WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&s.pool)
-            .await
-            .ok()
-            .flatten();
+    let store_id = match db::screen_store_id(&s.pool, id).await {
+        Ok(v) => v,
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
     match db::update_screen(
-        &s.pool, id, &f.label, &f.orientation, f.width_px, f.height_px, f.position,
+        &s.pool,
+        id,
+        &f.label,
+        &f.orientation,
+        f.width_px,
+        f.height_px,
+        f.position,
     )
     .await
     {
@@ -477,15 +519,12 @@ async fn admin_delete_screen(
     Path(id): Path<Uuid>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
-    let store_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT store_id FROM menuboard.screens WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&s.pool)
-            .await
-            .ok()
-            .flatten();
+    let store_id = match db::screen_store_id(&s.pool, id).await {
+        Ok(v) => v,
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
     match db::delete_screen(&s.pool, id).await {
         Ok(_) => match store_id {
             Some(sid) => Redirect::to(&format!("/admin/stores/{sid}")).into_response(),
@@ -551,18 +590,13 @@ struct ItemForm {
 
 async fn admin_menu(State(s): State<AppState>, headers: HeaderMap) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
-    let cats = match db::list_categories(&s.pool).await {
-        Ok(c) => c,
+    // Single query: categories with their item counts (no N+1).
+    let rows = match db::list_categories_with_counts(&s.pool).await {
+        Ok(r) => r,
         Err(e) => return err_response(WebError::Internal(e.to_string())),
     };
-    // Pair each category with its item count for the list.
-    let mut rows = Vec::with_capacity(cats.len());
-    for c in cats {
-        let n = db::list_items(&s.pool, c.id).await.map(|v| v.len() as i64).unwrap_or(0);
-        rows.push((c, n));
-    }
     Html(menu_page(&rows)).into_response()
 }
 
@@ -572,12 +606,17 @@ async fn admin_create_category(
     Form(f): Form<CategoryForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     let days = parse_days(&f.avail_days);
     match db::create_category(
-        &s.pool, &f.slug, &f.name, f.position,
-        opt(&f.avail_from), opt(&f.avail_to), &days,
+        &s.pool,
+        &f.slug,
+        &f.name,
+        f.position,
+        opt(&f.avail_from),
+        opt(&f.avail_to),
+        &days,
     )
     .await
     {
@@ -592,14 +631,17 @@ async fn admin_category(
     Path(id): Path<Uuid>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     let cat = match db::get_category(&s.pool, id).await {
         Ok(Some(c)) => c,
         Ok(None) => return err_response(WebError::NotFound(format!("category {id}"))),
         Err(e) => return err_response(WebError::Internal(e.to_string())),
     };
-    let items = db::list_items(&s.pool, id).await.unwrap_or_default();
+    let items = match db::list_items(&s.pool, id).await {
+        Ok(v) => v,
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
     Html(category_edit_page(&cat, &items)).into_response()
 }
 
@@ -610,12 +652,18 @@ async fn admin_update_category(
     Form(f): Form<CategoryForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     let days = parse_days(&f.avail_days);
     match db::update_category(
-        &s.pool, id, &f.slug, &f.name, f.position,
-        opt(&f.avail_from), opt(&f.avail_to), &days,
+        &s.pool,
+        id,
+        &f.slug,
+        &f.name,
+        f.position,
+        opt(&f.avail_from),
+        opt(&f.avail_to),
+        &days,
     )
     .await
     {
@@ -630,7 +678,7 @@ async fn admin_delete_category(
     Path(id): Path<Uuid>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     match db::delete_category(&s.pool, id).await {
         Ok(_) => Redirect::to("/admin/menu").into_response(),
@@ -645,14 +693,23 @@ async fn admin_create_item(
     Form(f): Form<ItemForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     let pmax = opt(&f.price_max).and_then(|v| v.parse::<f64>().ok());
     let in_stock = f.in_stock.is_some();
     let featured = f.featured.is_some();
     match db::create_item(
-        &s.pool, cat_id, &f.slug, &f.name, f.price_min, pmax,
-        opt(&f.image), opt(&f.description), in_stock, f.position, featured,
+        &s.pool,
+        cat_id,
+        &f.slug,
+        &f.name,
+        f.price_min,
+        pmax,
+        opt(&f.image),
+        opt(&f.description),
+        in_stock,
+        f.position,
+        featured,
     )
     .await
     {
@@ -668,15 +725,26 @@ async fn admin_update_item(
     Form(f): Form<ItemForm>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
     let pmax = opt(&f.price_max).and_then(|v| v.parse::<f64>().ok());
     let in_stock = f.in_stock.is_some();
     let featured = f.featured.is_some();
-    let cat_id = db::item_category(&s.pool, id).await;
+    let cat_id = match db::item_category(&s.pool, id).await {
+        Ok(v) => v,
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
     match db::update_item(
-        &s.pool, id, &f.name, f.price_min, pmax,
-        opt(&f.image), opt(&f.description), in_stock, f.position, featured,
+        &s.pool,
+        id,
+        &f.name,
+        f.price_min,
+        pmax,
+        opt(&f.image),
+        opt(&f.description),
+        in_stock,
+        f.position,
+        featured,
     )
     .await
     {
@@ -694,9 +762,12 @@ async fn admin_delete_item(
     Path(id): Path<Uuid>,
 ) -> Response {
     if let Err(r) = require_admin(&s, &headers) {
-        return r;
+        return *r;
     }
-    let cat_id = db::item_category(&s.pool, id).await;
+    let cat_id = match db::item_category(&s.pool, id).await {
+        Ok(v) => v,
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
     match db::delete_item(&s.pool, id).await {
         Ok(_) => match cat_id {
             Some(cid) => Redirect::to(&format!("/admin/menu/{cid}")).into_response(),

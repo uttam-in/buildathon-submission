@@ -31,13 +31,13 @@ fn err_response(e: WebError) -> HttpResponse {
 async fn home(res: web::Data<Resources>) -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(picker_page(&res.catalog()))
+        .body(picker_page(&res.catalog().await))
 }
 
 /// `GET /config/{config}` — choose a state for the given config.
 async fn config(res: web::Data<Resources>, path: web::Path<String>) -> HttpResponse {
     let config = path.into_inner();
-    let catalog = res.catalog();
+    let catalog = res.catalog().await;
     match find_entry(&catalog.configs, &config) {
         Some(cfg) => HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
@@ -49,14 +49,14 @@ async fn config(res: web::Data<Resources>, path: web::Path<String>) -> HttpRespo
 /// `GET /board/{config}/{state}` — gallery of the rendered wall's screens.
 async fn board(res: web::Data<Resources>, path: web::Path<(String, String)>) -> HttpResponse {
     let (config, state) = path.into_inner();
-    let catalog = res.catalog();
+    let catalog = res.catalog().await;
     let (Some(cfg), Some(st)) = (
         find_entry(&catalog.configs, &config),
         find_entry(&catalog.states, &state),
     ) else {
         return err_response(WebError::NotFound(format!("{config}/{state}")));
     };
-    match res.render(&config, &state) {
+    match res.render(&config, &state).await {
         Ok(output) => HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
             .body(gallery_page(cfg, st, &output)),
@@ -70,7 +70,7 @@ async fn screen(
     path: web::Path<(String, String, String)>,
 ) -> HttpResponse {
     let (config, state, screen) = path.into_inner();
-    match res.render_screen(&config, &state, &screen) {
+    match res.render_screen(&config, &state, &screen).await {
         Ok(html) => HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
             .body(html),

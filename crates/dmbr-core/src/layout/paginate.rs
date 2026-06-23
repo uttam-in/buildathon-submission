@@ -86,7 +86,11 @@ mod tests {
 
     fn group(id: &str, n: usize) -> CategoryWithItems {
         CategoryWithItems {
-            category: MenuCategory { id: id.into(), name: id.into(), display_order: 0 },
+            category: MenuCategory {
+                id: id.into(),
+                name: id.into(),
+                display_order: 0,
+            },
             items: (0..n)
                 .map(|i| MenuItem {
                     id: format!("{id}-{i}"),

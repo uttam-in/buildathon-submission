@@ -77,21 +77,17 @@ pub async fn verify_admin(pool: &PgPool, username: &str, password: &str) -> bool
 
 /// Lists all stores, ordered by slug.
 pub async fn list_stores(pool: &PgPool) -> Result<Vec<Store>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT id, slug, name, timezone, state_key FROM menuboard.stores ORDER BY slug",
-    )
-    .fetch_all(pool)
-    .await
+    sqlx::query_as("SELECT id, slug, name, timezone, state_key FROM menuboard.stores ORDER BY slug")
+        .fetch_all(pool)
+        .await
 }
 
 /// Fetches one store by id.
 pub async fn get_store(pool: &PgPool, id: Uuid) -> Result<Option<Store>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT id, slug, name, timezone, state_key FROM menuboard.stores WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
+    sqlx::query_as("SELECT id, slug, name, timezone, state_key FROM menuboard.stores WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
 }
 
 /// Creates a store and returns its id.
@@ -214,6 +210,15 @@ pub async fn update_screen(
     Ok(())
 }
 
+/// Looks up the owning store id of a screen (for redirects). Returns `Ok(None)`
+/// when the screen does not exist; propagates real DB errors.
+pub async fn screen_store_id(pool: &PgPool, id: Uuid) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar("SELECT store_id FROM menuboard.screens WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Deletes a screen.
 pub async fn delete_screen(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM menuboard.screens WHERE id = $1")
@@ -286,11 +291,54 @@ pub async fn list_categories(pool: &PgPool) -> Result<Vec<MenuCategoryRow>, sqlx
     .await
 }
 
-/// Fetches one category by id.
-pub async fn get_category(
-    pool: &PgPool,
+/// A category joined with its item count (one row of the menu list query).
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct CategoryWithCount {
     id: Uuid,
-) -> Result<Option<MenuCategoryRow>, sqlx::Error> {
+    slug: String,
+    name: String,
+    position: i32,
+    avail_from: Option<String>,
+    avail_to: Option<String>,
+    avail_days: Vec<String>,
+    item_count: i64,
+}
+
+/// Lists all categories with their item counts in a single query (no N+1).
+pub async fn list_categories_with_counts(
+    pool: &PgPool,
+) -> Result<Vec<(MenuCategoryRow, i64)>, sqlx::Error> {
+    let rows: Vec<CategoryWithCount> = sqlx::query_as(
+        "SELECT c.id, c.slug, c.name, c.position, c.avail_from, c.avail_to, c.avail_days,
+                count(i.id) AS item_count
+         FROM menuboard.menu_categories c
+         LEFT JOIN menuboard.menu_items i ON i.category_id = c.id
+         GROUP BY c.id
+         ORDER BY c.position, c.name",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            (
+                MenuCategoryRow {
+                    id: r.id,
+                    slug: r.slug,
+                    name: r.name,
+                    position: r.position,
+                    avail_from: r.avail_from,
+                    avail_to: r.avail_to,
+                    avail_days: r.avail_days,
+                },
+                r.item_count,
+            )
+        })
+        .collect())
+}
+
+/// Fetches one category by id.
+pub async fn get_category(pool: &PgPool, id: Uuid) -> Result<Option<MenuCategoryRow>, sqlx::Error> {
     sqlx::query_as(
         "SELECT id, slug, name, position, avail_from, avail_to, avail_days
          FROM menuboard.menu_categories WHERE id = $1",
@@ -368,15 +416,22 @@ pub async fn delete_category(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error>
 // ---- Menu: items -----------------------------------------------------------
 
 /// Lists items in a category, in order.
-pub async fn list_items(
-    pool: &PgPool,
-    category_id: Uuid,
-) -> Result<Vec<MenuItemRow>, sqlx::Error> {
+pub async fn list_items(pool: &PgPool, category_id: Uuid) -> Result<Vec<MenuItemRow>, sqlx::Error> {
     sqlx::query_as(&format!(
         "SELECT {ITEM_COLS} FROM menuboard.menu_items
          WHERE category_id = $1 ORDER BY position, name"
     ))
     .bind(category_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// Lists every menu item across all categories in one query, ordered by
+/// category then position. Used to build the full menu without an N+1 fan-out.
+pub async fn list_all_items(pool: &PgPool) -> Result<Vec<MenuItemRow>, sqlx::Error> {
+    sqlx::query_as(&format!(
+        "SELECT {ITEM_COLS} FROM menuboard.menu_items ORDER BY category_id, position, name"
+    ))
     .fetch_all(pool)
     .await
 }
@@ -460,14 +515,13 @@ pub async fn set_item_stock(pool: &PgPool, id: Uuid, in_stock: bool) -> Result<(
     Ok(())
 }
 
-/// Looks up the owning category id of an item (for redirects).
-pub async fn item_category(pool: &PgPool, id: Uuid) -> Option<Uuid> {
+/// Looks up the owning category id of an item (for redirects). Returns
+/// `Ok(None)` when the item does not exist; propagates real DB errors.
+pub async fn item_category(pool: &PgPool, id: Uuid) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar("SELECT category_id FROM menuboard.menu_items WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
         .await
-        .ok()
-        .flatten()
 }
 
 /// Deletes an item.
@@ -584,10 +638,19 @@ pub async fn build_full_menu(
     use dmbr_core::models::{FullMenu, MenuCategory, MenuItem};
 
     let now = hhmm_to_min(time).unwrap_or(0);
+    // Two queries total (categories + all items), grouped in memory — not N+1.
     let cats = list_categories(pool).await?;
+    let all_items = list_all_items(pool).await?;
+
+    // Group items by their owning category id (preserving query order).
+    let mut items_by_cat: std::collections::HashMap<uuid::Uuid, Vec<MenuItemRow>> =
+        std::collections::HashMap::new();
+    for it in all_items {
+        items_by_cat.entry(it.category_id).or_default().push(it);
+    }
+
     let mut categories = Vec::new();
     let mut items = Vec::new();
-
     for cat in &cats {
         if !category_visible(cat, day, now) {
             continue; // out-of-window category disappears entirely
@@ -597,7 +660,7 @@ pub async fn build_full_menu(
             name: cat.name.clone(),
             display_order: cat.position as i64,
         });
-        for it in list_items(pool, cat.id).await? {
+        for it in items_by_cat.get(&cat.id).into_iter().flatten() {
             let price_display = it
                 .price_max
                 .map(|max| format!("${:.2}\u{2013}${:.2}", it.price_min, max));

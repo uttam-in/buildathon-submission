@@ -30,6 +30,29 @@ fn format_price(price: f64) -> String {
     format!("${:.2}", price)
 }
 
+/// Returns a CSS-`url()`-safe form of an image URL, or `None` if the URL is not
+/// an acceptable absolute `http(s)` URL.
+///
+/// HTML-escaping is **not** sufficient inside a CSS `url('…')` context: the CSS
+/// tokenizer sees the raw bytes before HTML entities are decoded, so a `'`,
+/// `)`, or `\` in the URL could break out of the `url()` string and inject CSS.
+/// We allowlist the scheme and percent-encode the CSS-significant characters.
+fn css_url_safe(url: &str) -> Option<String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    // Reject control characters and whitespace outright.
+    if url.chars().any(|c| c.is_control() || c == ' ') {
+        return None;
+    }
+    Some(
+        url.replace('\\', "%5C")
+            .replace('\'', "%27")
+            .replace('(', "%28")
+            .replace(')', "%29"),
+    )
+}
+
 /// Presentation metadata for a screen's header band.
 #[derive(Debug, Clone, Default)]
 pub struct ScreenMeta {
@@ -131,7 +154,10 @@ fn featured_strip(pages: &[Vec<CategoryWithItems>]) -> String {
 
     let mut cards = String::new();
     for (cat_name, item) in &picks {
-        let url = item.image.as_deref().unwrap_or("");
+        // Only render a card when the image URL is safe for a CSS url() context.
+        let Some(url) = item.image.as_deref().and_then(css_url_safe) else {
+            continue;
+        };
         let name = escape_html(&item.name);
         let price = escape_html(
             &item
@@ -151,11 +177,15 @@ fn featured_strip(pages: &[Vec<CategoryWithItems>]) -> String {
 <div class=\"feat-meta\"><span class=\"feat-tag\">{tag}</span>\
 <span class=\"feat-name\">{name}</span>\
 <span class=\"feat-price\">{price}</span></div></div>",
-            url = escape_html(url),
+            url = url,
             tag = tag,
             name = name,
             price = price,
         );
+    }
+    // All candidate URLs may have been rejected as unsafe — emit nothing then.
+    if cards.is_empty() {
+        return String::new();
     }
     format!(
         "<aside class=\"featured\"><div class=\"feat-title\">Today's Features</div>\
@@ -424,7 +454,14 @@ mod tests {
     #[test]
     fn html_contains_name_and_price() {
         let groups = vec![group_with("Burgers", "Cheeseburger", 8.99)];
-        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
+        let html = render_screen(
+            &screen(),
+            &meta(),
+            std::slice::from_ref(&groups),
+            28,
+            4,
+            600,
+        );
         assert!(html.contains("Cheeseburger"));
         assert!(html.contains("$8.99"));
         assert!(html.contains("Burgers"));
@@ -434,7 +471,14 @@ mod tests {
     #[test]
     fn escapes_item_name_in_output() {
         let groups = vec![group_with("Cat", "Fish & <Chips>", 5.0)];
-        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
+        let html = render_screen(
+            &screen(),
+            &meta(),
+            std::slice::from_ref(&groups),
+            28,
+            4,
+            600,
+        );
         assert!(html.contains("Fish &amp; &lt;Chips&gt;"));
         assert!(!html.contains("Fish & <Chips>"));
     }
@@ -442,7 +486,14 @@ mod tests {
     #[test]
     fn no_script_or_external_urls() {
         let groups = vec![group_with("Burgers", "Cheeseburger", 8.99)];
-        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
+        let html = render_screen(
+            &screen(),
+            &meta(),
+            std::slice::from_ref(&groups),
+            28,
+            4,
+            600,
+        );
         assert!(!html.contains("<script"));
         assert!(!html.contains("http://"));
         assert!(!html.contains("https://"));
@@ -452,7 +503,14 @@ mod tests {
     fn continuation_marker_appended() {
         let mut groups = vec![group_with("Burgers", "Cheeseburger", 8.99)];
         groups[0].continued = true;
-        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
+        let html = render_screen(
+            &screen(),
+            &meta(),
+            std::slice::from_ref(&groups),
+            28,
+            4,
+            600,
+        );
         assert!(html.contains("Burgers"));
         assert!(html.contains("(cont.)"));
     }
@@ -463,7 +521,14 @@ mod tests {
         // ellipsis is introduced (challenge rule: wrapping is fine, clipping is not).
         let long = "X".repeat(200);
         let groups = vec![group_with("Cat", &long, 1.0)];
-        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 24, 1, 100);
+        let html = render_screen(
+            &screen(),
+            &meta(),
+            std::slice::from_ref(&groups),
+            24,
+            1,
+            100,
+        );
         assert!(html.contains(&long));
         assert!(!html.contains('…'));
     }
@@ -472,7 +537,14 @@ mod tests {
     fn price_display_overrides_numeric_price() {
         let mut groups = vec![group_with("Platters", "Mutton Platter", 19.99)];
         groups[0].items[0].price_display = Some("$19.99–79.99".into());
-        let html = render_screen(&screen(), &meta(), std::slice::from_ref(&groups), 28, 4, 600);
+        let html = render_screen(
+            &screen(),
+            &meta(),
+            std::slice::from_ref(&groups),
+            28,
+            4,
+            600,
+        );
         assert!(html.contains("$19.99–79.99"));
         assert!(!html.contains("$19.99<")); // not the bare numeric form
     }

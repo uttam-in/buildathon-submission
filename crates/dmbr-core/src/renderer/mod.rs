@@ -127,7 +127,10 @@ pub fn render(
                     "screen {} cycles through {} pages ({} items)",
                     screen.id,
                     pages.len(),
-                    slots.iter().map(CategoryWithItems::item_count).sum::<usize>()
+                    slots
+                        .iter()
+                        .map(CategoryWithItems::item_count)
+                        .sum::<usize>()
                 ),
             ));
         }

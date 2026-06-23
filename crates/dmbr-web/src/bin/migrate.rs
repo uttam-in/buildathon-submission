@@ -25,6 +25,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url = env::var("DATABASE_URL").map_err(|_| "DATABASE_URL not set")?;
     let admin_user = env::var("ADMIN_USER").unwrap_or_else(|_| "admin".into());
     let admin_pass = env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "admin".into());
+    if env::var("ADMIN_PASSWORD").is_err() {
+        eprintln!(
+            "WARNING: ADMIN_PASSWORD not set — seeding admin with the insecure default \
+             'admin'. Set ADMIN_USER/ADMIN_PASSWORD before running outside local dev."
+        );
+    }
 
     let pool = PgPoolOptions::new()
         .max_connections(2)
@@ -39,8 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("schema applied (stores, screens, admin_users, menu_categories, menu_items)");
 
     // Seed the menu from Resources/menu.json (idempotent — only if empty).
-    let menu_path =
-        env::var("MENU_JSON").unwrap_or_else(|_| "../Resources/menu.json".into());
+    let menu_path = env::var("MENU_JSON").unwrap_or_else(|_| "../Resources/menu.json".into());
     match std::fs::read_to_string(&menu_path) {
         Ok(text) => {
             let menu: dmbr_convert::challenge::ChallengeMenu = serde_json::from_str(&text)?;
