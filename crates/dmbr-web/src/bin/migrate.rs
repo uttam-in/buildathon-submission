@@ -17,6 +17,8 @@ use sqlx::postgres::PgPoolOptions;
 const SCHEMA_SQL: &str = include_str!("../../../../migrations/0001_menuboard.sql");
 /// The menu-catalog DDL.
 const MENU_SQL: &str = include_str!("../../../../migrations/0002_menu.sql");
+/// The featured-flag DDL.
+const FEATURED_SQL: &str = include_str!("../../../../migrations/0003_featured.sql");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Execute the whole DDL script. `sqlx::raw_sql` runs multiple statements.
     sqlx::raw_sql(SCHEMA_SQL).execute(&pool).await?;
     sqlx::raw_sql(MENU_SQL).execute(&pool).await?;
+    sqlx::raw_sql(FEATURED_SQL).execute(&pool).await?;
     println!("schema applied (stores, screens, admin_users, menu_categories, menu_items)");
 
     // Seed the menu from Resources/menu.json (idempotent — only if empty).

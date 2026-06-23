@@ -82,47 +82,80 @@ fn render_page_body(groups: &[CategoryWithItems]) -> String {
 /// Maximum photo cards in the featured strip.
 const MAX_FEATURED: usize = 3;
 
-/// Builds the "Today's Features" strip: up to [`MAX_FEATURED`] photo-bearing
-/// items, chosen deterministically (first in canonical order) from the screen's
-/// content. Items reaching the renderer are already in-stock and in-window, so
-/// the featured picks never show an 86'd item. Returns empty when no item on
-/// this screen has a photo.
+/// Builds the "Today's Features" strip: up to [`MAX_FEATURED`] photo cards.
+///
+/// Selection (deterministic): admin-marked `featured` items come first (in
+/// canonical order), then, if fewer than the max, the remaining slots are
+/// filled with the first non-featured photo-bearing items in order. Only items
+/// with a photo are eligible (the rail is photo cards). Items reaching the
+/// renderer are already in-stock and in-window, so an 86'd or out-of-window
+/// item is never featured — and a flagged-but-unavailable item simply isn't
+/// here, so the fallback fills its place. Returns empty when no item has a photo.
 fn featured_strip(pages: &[Vec<CategoryWithItems>]) -> String {
-    let mut cards = String::new();
-    let mut count = 0;
-    'outer: for page in pages {
+    // Collect photo-bearing items in canonical order, partitioned by flag.
+    let mut featured: Vec<&crate::models::MenuItem> = Vec::new();
+    let mut others: Vec<(&str, &crate::models::MenuItem)> = Vec::new();
+    let mut flagged_cats: Vec<&str> = Vec::new();
+    for page in pages {
         for group in page {
             for item in &group.items {
-                let Some(url) = &item.image else { continue };
-                let name = escape_html(&item.name);
-                let price = escape_html(
-                    &item
-                        .price_display
-                        .clone()
-                        .unwrap_or_else(|| format_price(item.price)),
-                );
-                let cat = escape_html(&group.category.name);
-                let _ = write!(
-                    cards,
-                    "<div class=\"feat-card\">\
-<div class=\"feat-img\" style=\"background-image:url('{url}')\"></div>\
-<div class=\"feat-meta\"><span class=\"feat-tag\">{cat}</span>\
-<span class=\"feat-name\">{name}</span>\
-<span class=\"feat-price\">{price}</span></div></div>",
-                    url = escape_html(url),
-                    cat = cat,
-                    name = name,
-                    price = price,
-                );
-                count += 1;
-                if count >= MAX_FEATURED {
-                    break 'outer;
+                if item.image.is_none() {
+                    continue;
+                }
+                if item.featured {
+                    featured.push(item);
+                    flagged_cats.push(&group.category.name);
+                } else {
+                    others.push((&group.category.name, item));
                 }
             }
         }
     }
-    if cards.is_empty() {
+
+    // Featured first, then fill from others, capped at MAX_FEATURED.
+    let mut picks: Vec<(&str, &crate::models::MenuItem)> = Vec::new();
+    for (item, cat) in featured.iter().zip(flagged_cats.iter()) {
+        picks.push((cat, item));
+    }
+    for entry in &others {
+        if picks.len() >= MAX_FEATURED {
+            break;
+        }
+        picks.push(*entry);
+    }
+    picks.truncate(MAX_FEATURED);
+
+    if picks.is_empty() {
         return String::new();
+    }
+
+    let mut cards = String::new();
+    for (cat_name, item) in &picks {
+        let url = item.image.as_deref().unwrap_or("");
+        let name = escape_html(&item.name);
+        let price = escape_html(
+            &item
+                .price_display
+                .clone()
+                .unwrap_or_else(|| format_price(item.price)),
+        );
+        let tag = if item.featured {
+            "Chef's Special".to_string()
+        } else {
+            escape_html(cat_name)
+        };
+        let _ = write!(
+            cards,
+            "<div class=\"feat-card\">\
+<div class=\"feat-img\" style=\"background-image:url('{url}')\"></div>\
+<div class=\"feat-meta\"><span class=\"feat-tag\">{tag}</span>\
+<span class=\"feat-name\">{name}</span>\
+<span class=\"feat-price\">{price}</span></div></div>",
+            url = escape_html(url),
+            tag = tag,
+            name = name,
+            price = price,
+        );
     }
     format!(
         "<aside class=\"featured\"><div class=\"feat-title\">Today's Features</div>\
@@ -367,6 +400,7 @@ mod tests {
                 description: None,
                 price_display: None,
                 image: None,
+                featured: false,
             }],
             continued: false,
         }

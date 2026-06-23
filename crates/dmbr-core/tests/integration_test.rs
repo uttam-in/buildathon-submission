@@ -33,6 +33,7 @@ fn ten_item_menu() -> FullMenu {
             description: None,
             price_display: None,
             image: None,
+            featured: false,
         });
     }
     for i in 0..5 {
@@ -46,6 +47,7 @@ fn ten_item_menu() -> FullMenu {
             description: None,
             price_display: None,
             image: None,
+            featured: false,
         });
     }
 

@@ -259,6 +259,7 @@ pub fn category_edit_page(cat: &MenuCategoryRow, items: &[MenuItemRow]) -> Strin
     }
     for it in items {
         let stock = if it.in_stock { " checked" } else { "" };
+        let feat = if it.featured { " checked" } else { "" };
         let pmax = it.price_max.map(|m| format!("{m:.2}")).unwrap_or_default();
         let img = it.image.clone().unwrap_or_default();
         let desc = it.description.clone().unwrap_or_default();
@@ -270,7 +271,9 @@ pub fn category_edit_page(cat: &MenuCategoryRow, items: &[MenuItemRow]) -> Strin
 <label class=\"field\">Max (range)<input name=\"price_max\" type=\"number\" step=\"0.01\" value=\"{pmax}\"></label>\
 <label class=\"field\">Position<input name=\"position\" type=\"number\" value=\"{pos}\"></label>\
 <label class=\"field\" style=\"flex-direction:row;align-items:center;gap:8px\">\
-<input name=\"in_stock\" type=\"checkbox\" value=\"true\"{stock}>In stock</label></div>\
+<input name=\"in_stock\" type=\"checkbox\" value=\"true\"{stock}>In stock</label>\
+<label class=\"field\" style=\"flex-direction:row;align-items:center;gap:8px\">\
+<input name=\"featured\" type=\"checkbox\" value=\"true\"{feat}>Feature</label></div>\
 <div class=\"row\">\
 <label class=\"field\">Image URL<input name=\"image\" value=\"{img}\"></label>\
 <label class=\"field\">Description<input name=\"description\" value=\"{desc}\"></label>\
@@ -283,6 +286,7 @@ pub fn category_edit_page(cat: &MenuCategoryRow, items: &[MenuItemRow]) -> Strin
             pmax = pmax,
             pos = it.position,
             stock = stock,
+            feat = feat,
             img = esc(&img),
             desc = esc(&desc),
         ));
@@ -316,6 +320,10 @@ text-transform:uppercase;letter-spacing:0.1em;\">Add an item</h2>\
 <div class=\"row\">\
 <label class=\"field\">Image URL<input name=\"image\"></label>\
 <label class=\"field\">Description<input name=\"description\"></label>\
+<label class=\"field\" style=\"flex-direction:row;align-items:center;gap:8px\">\
+<input name=\"in_stock\" type=\"checkbox\" value=\"true\" checked>In stock</label>\
+<label class=\"field\" style=\"flex-direction:row;align-items:center;gap:8px\">\
+<input name=\"featured\" type=\"checkbox\" value=\"true\">Feature</label>\
 <button class=\"btn\" type=\"submit\">Add item</button></div></form></div>",
         id = cat.id,
         name = esc(&cat.name),

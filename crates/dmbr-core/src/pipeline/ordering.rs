@@ -46,6 +46,7 @@ mod tests {
             description: None,
             price_display: None,
             image: None,
+            featured: false,
         }
     }
 

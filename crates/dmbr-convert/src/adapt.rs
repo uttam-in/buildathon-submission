@@ -167,6 +167,7 @@ pub fn adapt(
                 description: item.description.clone(),
                 price_display,
                 image: item.image.clone(),
+                featured: false,
             });
         }
     }

@@ -545,6 +545,8 @@ struct ItemForm {
     position: i32,
     #[serde(default)]
     in_stock: Option<String>, // checkbox: present = "true"
+    #[serde(default)]
+    featured: Option<String>, // checkbox: present = "true"
 }
 
 async fn admin_menu(State(s): State<AppState>, headers: HeaderMap) -> Response {
@@ -647,9 +649,10 @@ async fn admin_create_item(
     }
     let pmax = opt(&f.price_max).and_then(|v| v.parse::<f64>().ok());
     let in_stock = f.in_stock.is_some();
+    let featured = f.featured.is_some();
     match db::create_item(
         &s.pool, cat_id, &f.slug, &f.name, f.price_min, pmax,
-        opt(&f.image), opt(&f.description), in_stock, f.position,
+        opt(&f.image), opt(&f.description), in_stock, f.position, featured,
     )
     .await
     {
@@ -669,10 +672,11 @@ async fn admin_update_item(
     }
     let pmax = opt(&f.price_max).and_then(|v| v.parse::<f64>().ok());
     let in_stock = f.in_stock.is_some();
+    let featured = f.featured.is_some();
     let cat_id = db::item_category(&s.pool, id).await;
     match db::update_item(
         &s.pool, id, &f.name, f.price_min, pmax,
-        opt(&f.image), opt(&f.description), in_stock, f.position,
+        opt(&f.image), opt(&f.description), in_stock, f.position, featured,
     )
     .await
     {

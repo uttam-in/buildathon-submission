@@ -46,6 +46,10 @@ pub struct MenuItem {
     /// thumbnail beside the item and consider it for the featured rail.
     #[serde(default)]
     pub image: Option<String>,
+    /// Whether an admin has marked this item as featured ("today's special").
+    /// The renderer's featured rail prefers these; defaults to `false`.
+    #[serde(default)]
+    pub featured: bool,
 }
 
 /// A time-window rule selecting which categories are shown during a meal period.

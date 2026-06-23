@@ -267,12 +267,14 @@ pub struct MenuItemRow {
     pub in_stock: bool,
     /// Order within its category.
     pub position: i32,
+    /// Admin-marked "today's special".
+    pub featured: bool,
 }
 
 /// Column list for menu items with prices cast to float8 for f64 decoding.
 const ITEM_COLS: &str = "id, category_id, slug, name, \
 price_min::float8 AS price_min, price_max::float8 AS price_max, \
-image, description, in_stock, position";
+image, description, in_stock, position, featured";
 
 /// Lists all categories in display order.
 pub async fn list_categories(pool: &PgPool) -> Result<Vec<MenuCategoryRow>, sqlx::Error> {
@@ -392,11 +394,12 @@ pub async fn create_item(
     description: Option<&str>,
     in_stock: bool,
     position: i32,
+    featured: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO menuboard.menu_items
-         (category_id, slug, name, price_min, price_max, image, description, in_stock, position)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+         (category_id, slug, name, price_min, price_max, image, description, in_stock, position, featured)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
     )
     .bind(category_id)
     .bind(slug)
@@ -407,6 +410,7 @@ pub async fn create_item(
     .bind(description)
     .bind(in_stock)
     .bind(position)
+    .bind(featured)
     .execute(pool)
     .await?;
     Ok(())
@@ -424,11 +428,12 @@ pub async fn update_item(
     description: Option<&str>,
     in_stock: bool,
     position: i32,
+    featured: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE menuboard.menu_items
          SET name=$2, price_min=$3, price_max=$4, image=$5, description=$6,
-             in_stock=$7, position=$8, updated_at=now()
+             in_stock=$7, position=$8, featured=$9, updated_at=now()
          WHERE id=$1",
     )
     .bind(id)
@@ -439,6 +444,7 @@ pub async fn update_item(
     .bind(description)
     .bind(in_stock)
     .bind(position)
+    .bind(featured)
     .execute(pool)
     .await?;
     Ok(())
@@ -520,6 +526,7 @@ pub async fn seed_menu_from_json(pool: &PgPool, menu: &ChallengeMenu) -> Result<
                 item.description.as_deref(),
                 true,
                 ii as i32,
+                false,
             )
             .await?;
         }
@@ -604,6 +611,7 @@ pub async fn build_full_menu(
                 description: it.description.clone(),
                 price_display,
                 image: it.image.clone(),
+                featured: it.featured,
             });
         }
     }
