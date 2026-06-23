@@ -1,0 +1,27 @@
+# Build context is the submission root. Keep it lean: ship only the Rust
+# workspace sources, migrations, and the vendored Resources/.
+
+# Rust build artifacts (huge; rebuilt inside the image)
+**/target/
+
+# VCS
+.git/
+**/.gitignore
+
+# Node / Playwright e2e (not needed in the runtime image)
+**/node_modules/
+e2e/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+**/*.swp
+**/.DS_Store
+
+# Local env and secrets — NEVER bake into an image
+**/.env
+**/.env.*
+!**/.env.example
+
+# Docs that don't affect the build
+**/*.md

@@ -1,0 +1,10 @@
+{
+  "name": "weekend-evening",
+  "day": "sat",
+  "time": "19:00",
+  "outOfStock": [
+    "gulab-jamun",
+    "royal-falooda",
+    "seekh-kebab"
+  ]
+}

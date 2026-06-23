@@ -1,0 +1,18 @@
+{
+  "name": "duo",
+  "description": "2 landscape screens",
+  "screens": [
+    {
+      "id": "screen-1",
+      "width": 1920,
+      "height": 1080,
+      "orientation": "landscape"
+    },
+    {
+      "id": "screen-2",
+      "width": 1920,
+      "height": 1080,
+      "orientation": "landscape"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "weekday-morning",
+  "day": "tue",
+  "time": "08:30",
+  "outOfStock": [
+    "mysore-bonda",
+    "strawberry-falooda"
+  ]
+}

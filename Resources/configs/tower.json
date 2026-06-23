@@ -1,0 +1,12 @@
+{
+  "name": "tower",
+  "description": "1 portrait screen",
+  "screens": [
+    {
+      "id": "screen-1",
+      "width": 1080,
+      "height": 1920,
+      "orientation": "portrait"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "totem",
+  "description": "3 portrait screens",
+  "screens": [
+    {
+      "id": "screen-1",
+      "width": 1080,
+      "height": 1920,
+      "orientation": "portrait"
+    },
+    {
+      "id": "screen-2",
+      "width": 1080,
+      "height": 1920,
+      "orientation": "portrait"
+    },
+    {
+      "id": "screen-3",
+      "width": 1080,
+      "height": 1920,
+      "orientation": "portrait"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "solo",
+  "description": "1 landscape screen",
+  "screens": [
+    {
+      "id": "screen-1",
+      "width": 1920,
+      "height": 1080,
+      "orientation": "landscape"
+    }
+  ]
+}

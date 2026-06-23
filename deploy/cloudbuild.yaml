@@ -1,0 +1,95 @@
+# Cloud Build pipeline for the Digital Menu Board.
+#
+# Run from the submission root (the dir containing Cargo.toml, crates/,
+# migrations/, deploy/, and the vendored Resources/):
+#
+#   gcloud builds submit . \
+#     --config deploy/cloudbuild.yaml \
+#     --project siemap-500222
+#
+# Substitutions (override with --substitutions=_KEY=value):
+#   _REGION   Cloud Run + Artifact Registry region          (default us-central1)
+#   _REPO     Artifact Registry Docker repo name            (default containers)
+#   _SERVICE  Cloud Run service name                        (default dmbr)
+#
+# Prerequisites (created once by deploy.sh, or manually):
+#   - Artifact Registry repo  $_REPO  in  $_REGION
+#   - Secret Manager secrets:  dmbr-database-url, dmbr-session-secret,
+#                              dmbr-admin-user, dmbr-admin-password
+#   - The Cloud Build service account has roles: run.admin,
+#     artifactregistry.writer, secretmanager.secretAccessor, iam.serviceAccountUser
+
+substitutions:
+  _REGION: us-central1
+  _REPO: containers
+  _SERVICE: dmbr
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # 1) Build the image (context = repo root passed to `gcloud builds submit`).
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=deploy/Dockerfile
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+      - --cache-from=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+      - .
+
+  # 2) Push both tags so the deploy + future cache-from can resolve them.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, '--all-tags', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}']
+    waitFor: [build]
+
+  # 3) Apply DB migrations + seed using the dmbr-migrate binary in the image.
+  #    Run as a one-off Cloud Run *job* execution so it shares the same secret
+  #    wiring as the service. The job is created/updated idempotently.
+  - id: migrate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}"
+        gcloud run jobs deploy ${_SERVICE}-migrate \
+          --image="$IMAGE" \
+          --region=${_REGION} \
+          --command=dmbr-migrate \
+          --max-retries=1 \
+          --task-timeout=300 \
+          --set-secrets=DATABASE_URL=dmbr-database-url:latest,ADMIN_USER=dmbr-admin-user:latest,ADMIN_PASSWORD=dmbr-admin-password:latest \
+          --quiet
+        gcloud run jobs execute ${_SERVICE}-migrate --region=${_REGION} --wait --quiet
+    waitFor: [push]
+
+  # 4) Deploy the public service.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}"
+        gcloud run deploy ${_SERVICE} \
+          --image="$IMAGE" \
+          --region=${_REGION} \
+          --platform=managed \
+          --allow-unauthenticated \
+          --port=8080 \
+          --cpu=1 \
+          --memory=512Mi \
+          --min-instances=0 \
+          --max-instances=4 \
+          --set-env-vars=RESOURCES_DIR=/app/Resources \
+          --set-secrets=DATABASE_URL=dmbr-database-url:latest,SESSION_SECRET=dmbr-session-secret:latest \
+          --quiet
+    waitFor: [migrate]

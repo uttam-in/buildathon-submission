@@ -1,0 +1,18 @@
+# Files NOT uploaded to Cloud Build when running `gcloud builds submit` from
+# the submission root. Mirrors .dockerignore so the upload tarball stays small.
+
+.git/
+.gitignore
+
+**/target/
+**/node_modules/
+e2e/
+
+.vscode/
+.idea/
+**/*.swp
+**/.DS_Store
+
+**/.env
+**/.env.*
+!**/.env.example

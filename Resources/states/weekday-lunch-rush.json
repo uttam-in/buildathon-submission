@@ -1,0 +1,12 @@
+{
+  "name": "weekday-lunch-rush",
+  "day": "wed",
+  "time": "12:45",
+  "outOfStock": [
+    "chicken-dum-biryani",
+    "butter-naan",
+    "veg-thali",
+    "samosa-2-pc",
+    "mango-lassi"
+  ]
+}
