@@ -10,7 +10,9 @@
 # Cloud Build (cloudbuild.yaml) and deploy.sh both set the context correctly.
 
 # ---- Stage 1: build the Rust workspace ----------------------------------
-FROM rust:1.82-slim-bookworm AS builder
+# 1.88+ is required: the locked transitive dep home 0.5.12 declares
+# `rust-version = 1.88` (and uses edition2024, stable since 1.85).
+FROM rust:1.88-slim-bookworm AS builder
 
 # pkg-config / libssl are not required: sqlx uses rustls (tls-rustls) and there
 # is no native-tls dependency in the tree. We link glibc and run on slim debian.

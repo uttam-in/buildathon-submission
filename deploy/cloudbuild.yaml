@@ -33,9 +33,13 @@ options:
   machineType: E2_HIGHCPU_8
 
 steps:
-  # 1) Build the image (context = repo root passed to `gcloud builds submit`).
+  # 1) Build the image. The Dockerfile uses `--mount=type=cache`, which needs
+  #    BuildKit — enabled here via DOCKER_BUILDKIT=1. `--cache-from` warms the
+  #    layer cache from the previous :latest (a no-op / harmless on first build).
   - id: build
     name: gcr.io/cloud-builders/docker
+    env:
+      - DOCKER_BUILDKIT=1
     args:
       - build
       - --file=deploy/Dockerfile
@@ -61,7 +65,7 @@ steps:
       - |
         IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}"
         gcloud run jobs deploy ${_SERVICE}-migrate \
-          --image="$IMAGE" \
+          --image="$$IMAGE" \
           --region=${_REGION} \
           --command=dmbr-migrate \
           --max-retries=1 \
@@ -80,7 +84,7 @@ steps:
       - |
         IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}"
         gcloud run deploy ${_SERVICE} \
-          --image="$IMAGE" \
+          --image="$$IMAGE" \
           --region=${_REGION} \
           --platform=managed \
           --allow-unauthenticated \
