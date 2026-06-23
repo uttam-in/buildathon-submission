@@ -1,5 +1,6 @@
 /target
-Cargo.lock
+# Cargo.lock IS committed: this is an application/binary workspace, and the
+# Docker build copies it for reproducible, pinned dependency resolution.
 **/*.rs.bk
 /out
 **/out/
