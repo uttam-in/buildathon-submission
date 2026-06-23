@@ -87,8 +87,8 @@ every run. See [`COSTS.md`](COSTS.md) for the economics (zero AI per change).
 | `dmbr-core`          | library | Data models, rules pipeline, layout engine, pagination, HTML renderer, hash.|
 | `dmbr-cli`           | binary  | CLI front-end for the engine's native schema; prints `LayoutOutput` JSON.   |
 | `dmbr-convert`       | binary  | Runs the engine on the **challenge** `Resources/` format; writes HTML files.|
-| `dmbr-web`           | library | Shared web logic: file loading, render helpers, picker/gallery HTML, Postgres data layer (stores/screens/admin), admin pages. Also the `dmbr-migrate` bin. |
-| `dmbr-server-axum`   | binary  | **Axum** HTTP server: serves boards as live pages **and** the Postgres-backed admin UI for stores + screen monitors. |
+| `dmbr-web`           | library | Shared web logic: render helpers, picker/gallery HTML, Postgres data layer (stores, screens, admin, menu), admin pages, and `build_full_menu` (DB → engine menu). Also the `dmbr-migrate` bin. |
+| `dmbr-server-axum`   | binary  | **Axum** HTTP server: serves boards as live pages **and** the Postgres-backed admin UI for stores, screen monitors, and the menu. |
 | `dmbr-server-actix`  | binary  | **Actix Web** HTTP server: serves the same boards (DB-free renderer demo).  |
 
 ## Build
@@ -117,23 +117,35 @@ Routes (both servers): `GET /` (config picker) · `GET /config/{config}` ·
 
 ## Admin app (Postgres-backed)
 
-The Axum server adds a management UI to add/edit **stores** and their **screen
-monitors**, behind an admin login. A store's set of monitors *is* its wall
-configuration — `GET /store/{slug}` renders that store's wall live.
+The Axum server adds a management UI, behind an admin login, to manage:
 
-Only stores, monitors, and admin users live in Postgres (schema `menuboard`);
-the menu and day-states are still read from `Resources/` files (no menu DB).
+- **Stores** and their **screen monitors** — a store's set of monitors *is* its
+  wall configuration. `GET /store/{slug}` renders that store's wall live.
+- **The menu** — categories and items, prices (single or range), photos,
+  per-category availability (time window + weekday set), a per-item **in-stock**
+  toggle (the DB equivalent of 86'ing), and a per-item **featured** flag that
+  drives the "Today's Features" rail.
 
-**One-time setup** — create the schema and seed an admin:
+**The database is the source of truth for the menu** (schema `menuboard`):
+stores, screens, admin users, `menu_categories`, and `menu_items` all live in
+Postgres. `Resources/menu.json` is only a one-time seed; day-states and wall
+configs (`states/`, `configs/`) remain file-based.
+
+**One-time setup** — create the schema, seed the menu from `menu.json`, and
+seed an admin:
 
 ```sh
 DATABASE_URL=postgres://… \
 ADMIN_USER=admin ADMIN_PASSWORD=change-me \
+MENU_JSON=../Resources/menu.json \
 cargo run -p dmbr-web --bin dmbr-migrate
 ```
 
-Schema (`migrations/0001_menuboard.sql`): `menuboard.stores`,
-`menuboard.screens`, `menuboard.admin_users` (Argon2-hashed passwords).
+Idempotent: re-running re-applies the schema and re-hashes the admin password,
+but skips menu seeding once the tables are populated. Migrations:
+`migrations/0001_menuboard.sql` (stores, screens, admin_users),
+`0002_menu.sql` (menu_categories, menu_items), `0003_featured.sql`
+(featured flag). Passwords are Argon2-hashed.
 
 **Run the server with the DB wired:**
 
@@ -145,9 +157,20 @@ cargo run -p dmbr-server-axum
 ```
 
 Then open `http://localhost:8080/admin` and sign in. Admin routes:
-`/admin/login` · `/admin/logout` · `/admin/stores` (list + create) ·
-`/admin/stores/{id}` (edit store + manage its monitors). Sessions are
-HMAC-signed cookies (`SESSION_SECRET`); no server-side session store.
+`/admin/login` · `/admin/logout` · `/admin/stores` (list/create) ·
+`/admin/stores/{id}` (edit store + monitors) · `/admin/menu` (categories) ·
+`/admin/menu/{id}` (edit a category + full item CRUD, incl. in-stock and
+featured toggles). Editing the menu changes every store's wall on next refresh.
+Sessions are HMAC-signed cookies (`SESSION_SECRET`); no server-side session
+store.
+
+### Today's Features
+
+The featured rail prefers admin-flagged items (tagged **Chef's Special**), then
+fills remaining slots from photo-bearing items in canonical order, capped at
+three. Because filtering runs first, a flagged item that is sold out or out of
+its availability window never appears — the fallback quietly fills its place, so
+the rail stays full.
 
 ## Running on the challenge data
 
@@ -279,12 +302,37 @@ written to stderr and the process exits with code `1`.
 
 ## Test
 
+### Rust (unit + integration)
+
 ```sh
 cargo test
 ```
 
 Unit tests live alongside the modules (`#[cfg(test)]`) and an end-to-end
 integration test lives in `crates/dmbr-core/tests/integration_test.rs`.
+
+### Playwright (browser end-to-end)
+
+`e2e/` holds a Playwright suite that drives the running server in a real
+browser — the public renderer (all six configs, every-item-exactly-once,
+determinism) and the admin app (auth guard, store + monitor CRUD, menu editor,
+featured flag). Admin-app tests create throwaway records and clean them up, so
+they don't disturb seeded data.
+
+Start the DB-backed Axum server (see above), then:
+
+```sh
+cd e2e
+npm install
+npx playwright install chromium
+
+# point the tests at the server; creds come from env (no secrets in the repo)
+BASE_URL=http://localhost:8080 ADMIN_USER=admin ADMIN_PASSWORD=… npx playwright test
+```
+
+Or let Playwright boot the server itself by setting `START_SERVER=1` and
+`DATABASE_URL` (see `e2e/playwright.config.ts`). `npm run report` opens the HTML
+report.
 
 ## License
 
