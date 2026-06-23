@@ -33,7 +33,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use dmbr_web::admin_pages::{login_page, store_edit_page, stores_page};
+use dmbr_web::admin_pages::{
+    category_edit_page, login_page, menu_page, store_edit_page, stores_page,
+};
 use dmbr_web::{config_page, db, find_entry, gallery_page, picker_page, Entry, Resources, WebError};
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -92,6 +94,14 @@ async fn main() {
         .route("/admin/stores/:id/screens", post(admin_create_screen))
         .route("/admin/screens/:id/update", post(admin_update_screen))
         .route("/admin/screens/:id/delete", post(admin_delete_screen))
+        // admin: menu editor
+        .route("/admin/menu", get(admin_menu).post(admin_create_category))
+        .route("/admin/menu/:id", get(admin_category))
+        .route("/admin/menu/:id/update", post(admin_update_category))
+        .route("/admin/menu/:id/delete", post(admin_delete_category))
+        .route("/admin/menu/:id/items", post(admin_create_item))
+        .route("/admin/items/:id/update", post(admin_update_item))
+        .route("/admin/items/:id/delete", post(admin_delete_item))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
@@ -203,7 +213,11 @@ Add some in <a style='color:#f4c87a' href='/admin/stores'>admin</a>.</p></body>"
         )
             .into_response();
     }
-    match s.resources.render_store_screens(&store.state_key, &screens) {
+    match s
+        .resources
+        .render_store_from_db(&s.pool, &store.state_key, &store.name, &screens)
+        .await
+    {
         Ok(output) => {
             let cfg = Entry { key: slug.clone(), name: store.name.clone() };
             let st = Entry { key: store.state_key.clone(), name: store.state_key.clone() };
@@ -221,7 +235,11 @@ async fn store_screen(
         Ok(v) => v,
         Err(e) => return err_response(e),
     };
-    match s.resources.render_store_screens(&store.state_key, &screens) {
+    match s
+        .resources
+        .render_store_from_db(&s.pool, &store.state_key, &store.name, &screens)
+        .await
+    {
         Ok(output) => match output.screens.into_iter().find(|sc| sc.screen_id == screen_id) {
             Some(sc) => Html(sc.html_content).into_response(),
             None => err_response(WebError::NotFound(format!("screen '{screen_id}'"))),
@@ -472,6 +490,213 @@ async fn admin_delete_screen(
         Ok(_) => match store_id {
             Some(sid) => Redirect::to(&format!("/admin/stores/{sid}")).into_response(),
             None => Redirect::to("/admin/stores").into_response(),
+        },
+        Err(e) => err_response(WebError::Internal(e.to_string())),
+    }
+}
+
+// ---- Admin: menu (categories + items) --------------------------------------
+
+/// Splits a comma-separated day list into trimmed, non-empty codes.
+fn parse_days(csv: &str) -> Vec<String> {
+    csv.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Maps an empty string to None (for optional text inputs).
+fn opt(s: &str) -> Option<&str> {
+    let t = s.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t)
+    }
+}
+
+#[derive(Deserialize)]
+struct CategoryForm {
+    slug: String,
+    name: String,
+    #[serde(default)]
+    position: i32,
+    #[serde(default)]
+    avail_from: String,
+    #[serde(default)]
+    avail_to: String,
+    #[serde(default)]
+    avail_days: String,
+}
+
+#[derive(Deserialize)]
+struct ItemForm {
+    #[serde(default)]
+    slug: String,
+    name: String,
+    price_min: f64,
+    #[serde(default)]
+    price_max: String,
+    #[serde(default)]
+    image: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    position: i32,
+    #[serde(default)]
+    in_stock: Option<String>, // checkbox: present = "true"
+}
+
+async fn admin_menu(State(s): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    let cats = match db::list_categories(&s.pool).await {
+        Ok(c) => c,
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
+    // Pair each category with its item count for the list.
+    let mut rows = Vec::with_capacity(cats.len());
+    for c in cats {
+        let n = db::list_items(&s.pool, c.id).await.map(|v| v.len() as i64).unwrap_or(0);
+        rows.push((c, n));
+    }
+    Html(menu_page(&rows)).into_response()
+}
+
+async fn admin_create_category(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Form(f): Form<CategoryForm>,
+) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    let days = parse_days(&f.avail_days);
+    match db::create_category(
+        &s.pool, &f.slug, &f.name, f.position,
+        opt(&f.avail_from), opt(&f.avail_to), &days,
+    )
+    .await
+    {
+        Ok(_) => Redirect::to("/admin/menu").into_response(),
+        Err(e) => err_response(WebError::Internal(e.to_string())),
+    }
+}
+
+async fn admin_category(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    let cat = match db::get_category(&s.pool, id).await {
+        Ok(Some(c)) => c,
+        Ok(None) => return err_response(WebError::NotFound(format!("category {id}"))),
+        Err(e) => return err_response(WebError::Internal(e.to_string())),
+    };
+    let items = db::list_items(&s.pool, id).await.unwrap_or_default();
+    Html(category_edit_page(&cat, &items)).into_response()
+}
+
+async fn admin_update_category(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Form(f): Form<CategoryForm>,
+) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    let days = parse_days(&f.avail_days);
+    match db::update_category(
+        &s.pool, id, &f.slug, &f.name, f.position,
+        opt(&f.avail_from), opt(&f.avail_to), &days,
+    )
+    .await
+    {
+        Ok(_) => Redirect::to(&format!("/admin/menu/{id}")).into_response(),
+        Err(e) => err_response(WebError::Internal(e.to_string())),
+    }
+}
+
+async fn admin_delete_category(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    match db::delete_category(&s.pool, id).await {
+        Ok(_) => Redirect::to("/admin/menu").into_response(),
+        Err(e) => err_response(WebError::Internal(e.to_string())),
+    }
+}
+
+async fn admin_create_item(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(cat_id): Path<Uuid>,
+    Form(f): Form<ItemForm>,
+) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    let pmax = opt(&f.price_max).and_then(|v| v.parse::<f64>().ok());
+    let in_stock = f.in_stock.is_some();
+    match db::create_item(
+        &s.pool, cat_id, &f.slug, &f.name, f.price_min, pmax,
+        opt(&f.image), opt(&f.description), in_stock, f.position,
+    )
+    .await
+    {
+        Ok(_) => Redirect::to(&format!("/admin/menu/{cat_id}")).into_response(),
+        Err(e) => err_response(WebError::Internal(e.to_string())),
+    }
+}
+
+async fn admin_update_item(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Form(f): Form<ItemForm>,
+) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    let pmax = opt(&f.price_max).and_then(|v| v.parse::<f64>().ok());
+    let in_stock = f.in_stock.is_some();
+    let cat_id = db::item_category(&s.pool, id).await;
+    match db::update_item(
+        &s.pool, id, &f.name, f.price_min, pmax,
+        opt(&f.image), opt(&f.description), in_stock, f.position,
+    )
+    .await
+    {
+        Ok(_) => match cat_id {
+            Some(cid) => Redirect::to(&format!("/admin/menu/{cid}")).into_response(),
+            None => Redirect::to("/admin/menu").into_response(),
+        },
+        Err(e) => err_response(WebError::Internal(e.to_string())),
+    }
+}
+
+async fn admin_delete_item(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Response {
+    if let Err(r) = require_admin(&s, &headers) {
+        return r;
+    }
+    let cat_id = db::item_category(&s.pool, id).await;
+    match db::delete_item(&s.pool, id).await {
+        Ok(_) => match cat_id {
+            Some(cid) => Redirect::to(&format!("/admin/menu/{cid}")).into_response(),
+            None => Redirect::to("/admin/menu").into_response(),
         },
         Err(e) => err_response(WebError::Internal(e.to_string())),
     }

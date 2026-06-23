@@ -15,6 +15,8 @@ use sqlx::postgres::PgPoolOptions;
 
 /// The schema DDL, embedded so the binary is self-contained.
 const SCHEMA_SQL: &str = include_str!("../../../../migrations/0001_menuboard.sql");
+/// The menu-catalog DDL.
+const MENU_SQL: &str = include_str!("../../../../migrations/0002_menu.sql");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,7 +32,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("connected; applying schema…");
     // Execute the whole DDL script. `sqlx::raw_sql` runs multiple statements.
     sqlx::raw_sql(SCHEMA_SQL).execute(&pool).await?;
-    println!("schema applied (menuboard.stores, screens, admin_users)");
+    sqlx::raw_sql(MENU_SQL).execute(&pool).await?;
+    println!("schema applied (stores, screens, admin_users, menu_categories, menu_items)");
+
+    // Seed the menu from Resources/menu.json (idempotent — only if empty).
+    let menu_path =
+        env::var("MENU_JSON").unwrap_or_else(|_| "../Resources/menu.json".into());
+    match std::fs::read_to_string(&menu_path) {
+        Ok(text) => {
+            let menu: dmbr_convert::challenge::ChallengeMenu = serde_json::from_str(&text)?;
+            let seeded = dmbr_web::db::seed_menu_from_json(&pool, &menu).await?;
+            if seeded {
+                let n = dmbr_web::db::menu_item_count(&pool).await?;
+                println!("seeded menu from '{menu_path}' ({n} items)");
+            } else {
+                println!("menu already populated — skipped seeding");
+            }
+        }
+        Err(e) => println!("note: could not read '{menu_path}' ({e}); skipped menu seed"),
+    }
 
     // Hash the admin password with Argon2.
     let salt = SaltString::generate(&mut OsRng);

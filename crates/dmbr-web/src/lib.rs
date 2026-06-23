@@ -175,6 +175,32 @@ impl Resources {
             .map_err(|e| WebError::Internal(format!("render failed: {e}")))
     }
 
+    /// Renders a store's wall using the **database** menu (DB is the source of
+    /// truth). The day-state (`day` + `time`) is still read from the store's
+    /// `state_key` file; the menu, prices, photos, availability and in-stock
+    /// flags all come from Postgres. `screens` is `(screen_id, orientation, w, h)`
+    /// in wall order.
+    pub async fn render_store_from_db(
+        &self,
+        pool: &sqlx::PgPool,
+        state_key: &str,
+        restaurant_id: &str,
+        screens: &[(String, String, u32, u32)],
+    ) -> Result<LayoutOutput, WebError> {
+        let state: ChallengeState =
+            self.load_json(&self.root.join("states").join(format!("{state_key}.json")))?;
+
+        let menu = crate::db::build_full_menu(pool, restaurant_id, &state.day, &state.time)
+            .await
+            .map_err(|e| WebError::Internal(format!("db menu: {e}")))?;
+
+        let config = build_screen_config(screens)
+            .map_err(|e| WebError::Internal(format!("bad screen config: {e}")))?;
+
+        dmbr_core::render(&menu, &config, &db_day_state(&state.out_of_stock))
+            .map_err(|e| WebError::Internal(format!("render failed: {e}")))
+    }
+
     /// Reads and deserializes a JSON file, mapping a missing file to a 404.
     fn load_json<T: for<'de> serde::Deserialize<'de>>(&self, path: &Path) -> Result<T, WebError> {
         let text = fs::read_to_string(path).map_err(|e| {
@@ -310,6 +336,49 @@ native resolution.</p>\
 /// Looks up an [`Entry`] by key in a slice, for resolving display names.
 pub fn find_entry<'a>(entries: &'a [Entry], key: &str) -> Option<&'a Entry> {
     entries.iter().find(|e| e.key == key)
+}
+
+/// Builds an engine `ScreenConfig` from `(screen_id, orientation, w, h)` tuples
+/// laid out in a single row (every provided wall is one orientation).
+fn build_screen_config(
+    screens: &[(String, String, u32, u32)],
+) -> Result<dmbr_core::models::ScreenConfig, String> {
+    use dmbr_core::models::{Arrangement, Orientation, ScreenConfig, ScreenDef};
+    let mut defs = Vec::with_capacity(screens.len());
+    for (i, (id, orientation, w, h)) in screens.iter().enumerate() {
+        let o = match orientation.to_ascii_lowercase().as_str() {
+            "landscape" => Orientation::Landscape,
+            "portrait" => Orientation::Portrait,
+            other => return Err(format!("bad orientation '{other}'")),
+        };
+        defs.push(ScreenDef {
+            id: id.clone(),
+            orientation: o,
+            width_px: *w,
+            height_px: *h,
+            col: i as u32,
+            row: 0,
+        });
+    }
+    Ok(ScreenConfig {
+        screen_count: screens.len() as u8,
+        arrangement: Arrangement { columns: (screens.len() as u32).max(1), rows: 1 },
+        screens: defs,
+    })
+}
+
+/// Builds a `DayState` for the DB render path. Category availability and in
+/// -stock are already resolved when building the menu, so meal-period detection
+/// is short-circuited with an explicit `all` period. Any extra ids in the
+/// state file's `outOfStock` still hide those items (belt-and-suspenders).
+fn db_day_state(out_of_stock: &[String]) -> dmbr_core::models::DayState {
+    dmbr_core::models::DayState {
+        timestamp: "1970-01-01T00:00:00Z".into(),
+        timezone: "UTC".into(),
+        sold_out_item_ids: out_of_stock.to_vec(),
+        active_meal_period: Some("all".into()),
+        promotion_item_ids: Vec::new(),
+    }
 }
 
 #[cfg(test)]
