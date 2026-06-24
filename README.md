@@ -1,5 +1,7 @@
 # Digital Menu Board Layout Renderer
 
+**Live demo:** https://dmbr-16802728288.us-central1.run.app/ — public boards at `/`, admin console at `/admin`.
+
 A deterministic Rust engine that turns a restaurant menu, a screen wall
 configuration, and the current day-state into self-contained HTML/CSS menu
 boards — one per physical screen — with a reproducible SHA-256 render hash.
@@ -334,7 +336,3 @@ BASE_URL=http://localhost:8080 ADMIN_USER=admin ADMIN_PASSWORD=… npx playwrigh
 Or let Playwright boot the server itself by setting `START_SERVER=1` and
 `DATABASE_URL` (see `e2e/playwright.config.ts`). `npm run report` opens the HTML
 report.
-
-## License
-
-MIT
