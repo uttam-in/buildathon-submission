@@ -55,6 +55,21 @@ gcloud builds submit . \
 This rebuilds, re-runs migrations (idempotent — `IF NOT EXISTS` + admin
 upsert + seed-only-if-empty), and rolls out a new Cloud Run revision.
 
+## Continuous deployment (auto-deploy on push)
+
+A Cloud Build trigger (`GitTrigger`, global) is connected to the GitHub repo
+`uttam-in/buildathon-submission`. Every push to `main` automatically runs
+`deploy/cloudbuild.yaml` (build → push → migrate → deploy) as the project's
+compute service account. No manual `gcloud builds submit` is needed.
+
+```bash
+# Inspect the trigger
+gcloud builds triggers describe GitTrigger --region global --project siemap-500222
+
+# Fire it manually against main without pushing
+gcloud builds triggers run GitTrigger --region global --branch main --project siemap-500222
+```
+
 ## What the migrate step does
 
 The pipeline runs the `dmbr-migrate` binary as a Cloud Run **job** before the
