@@ -336,3 +336,11 @@ BASE_URL=http://localhost:8080 ADMIN_USER=admin ADMIN_PASSWORD=… npx playwrigh
 Or let Playwright boot the server itself by setting `START_SERVER=1` and
 `DATABASE_URL` (see `e2e/playwright.config.ts`). `npm run report` opens the HTML
 report.
+
+## License
+
+Business Source License 1.1 (BUSL-1.1) — see [LICENSE](LICENSE).
+
+Free for development, testing, and other non-production use; production use
+requires a commercial license from the Licensor. On the Change Date
+(2028-06-24) the code converts to GPL v2 or later.

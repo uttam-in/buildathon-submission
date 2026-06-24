@@ -2,6 +2,7 @@
 name = "dmbr-web"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 dmbr-core = { path = "../dmbr-core" }

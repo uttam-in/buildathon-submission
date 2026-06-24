@@ -2,6 +2,7 @@
 name = "dmbr-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Core library for the Digital Menu Board Layout Renderer: schemas, rules pipeline, layout engine, and HTML rendering."
 
 [dependencies]

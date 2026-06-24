@@ -2,6 +2,7 @@
 name = "dmbr-cli"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Command-line interface for the Digital Menu Board Layout Renderer."
 
 [[bin]]
